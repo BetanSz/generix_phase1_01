@@ -58,7 +58,7 @@ for i, doc in enumerate(items, start=1):
 
 doc_id = "M_cafe_mao_c_010825-CAFE-MEO-202307-150831-BDC-PRESTATIONS-EDI.pdf" #works
 doc_id = "M_canon_europe_a_CONTRAT-TOD-CANON.pdf" #works
-doc_id = "M_caloteries_b_Calottiers-201706-058931.pdf" #works
+doc_id = "M_caloteries_b_Calottiers-201706-058931.pdf"
 doc = cosmos_digitaliezd.read_item(item=doc_id, partition_key=doc_id)
 print(doc["id"], doc.get("blob_path"), doc.get("page_count"))
 doc_content = doc.get("content", "")
