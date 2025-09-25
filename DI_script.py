@@ -67,9 +67,12 @@ print("found in blob:", pdfs)
 
 analyse_doc_model = "prebuilt-read"
 analyse_doc_model = "prebuilt-layout"
-pdfs=['M/caloteries/b/Calottiers 201706 058931.pdf']
+#pdfs=['M/caloteries/b/Calottiers 201706 058931.pdf']
+pdfs = [pdf for pdf in pdfs if "New contracts" in pdf]
+embed()
 
-for pdf_name in pdfs[:1]:
+for i, pdf_name in enumerate(pdfs):
+    print(f"processing....{i}/{len(pdfs)}", pdf_name)
     #breakpoint()
     pdf_bytes = container.download_blob(pdf_name).readall()
     #poller = client_di.begin_analyze_document(analyse_doc_model, pdf_bytes)
@@ -104,10 +107,11 @@ for pdf_name in pdfs[:1]:
 #    with open(local_path, "w", encoding="utf-8", newline="\n") as f:
 #        f.write(doc_payload.get("content",""))
 #breakpoint()
-embed()
+#embed()
 layout_price_page = 0.008626 #e
 doc_pages = [doc["page_count"] for doc in docs]
 doc_mean = sum(doc_pages)/len(doc_pages)
+print("mean pages per contract = ", doc_mean)
 print("price [single document, 10000X]", layout_price_page*doc_mean, layout_price_page*10000*doc_mean)
 
 out_dir = Path(r"C:\Users\EstebanSzames\OneDrive - CELLENZA\Bureau\Generix\generix_phase1_01\doc_digitalized_sample")
