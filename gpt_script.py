@@ -32,8 +32,8 @@ for i, doc in enumerate(items, start=1):
 
 #embed()
 company_name = "S.N.F"
-company_name = "NORAUTO" # ok after truncation
-company_name = "SAVENCIA"
+#company_name = "NORAUTO" # ok after truncation
+#company_name = "SAVENCIA"
 #company_name = "BOIRON"
 doc_ids = list(cosmos_digitaliezd.query_items(
     query="SELECT VALUE c.id FROM c WHERE CONTAINS(c.id, @kw, true) AND ENDSWITH(c.id, '.pdf')",
