@@ -113,18 +113,18 @@ df = pd.json_normalize(data["products"])
 print(df.to_markdown(index=False))
 
 col_order  = ['company_name', 'signature_date_cg', 'signature_date_cp', 'product_code', 'product_name',
-              'duree_de_service',  'duree_de_service_notes', 'term_mode', 'billing_frequency', 'payment_methods', 'payment_terms', "consumption_start_event",
+              'duree_de_service',  'duree_de_service_notes', 'term_mode', 'billing_frequency', "bon_de_command" ,'payment_methods', 'payment_terms', "debut_facturation",
  'price_unitaire',"quantity","loyer",'devise_de_facturation', 'price_periodicity', 'one_shot_service', 'tax_basis','is_included_or_free',
- 'usage_included_allowance', 'usage_unit', 'usage_overage_price', 'usage_overage_periodicity', 'usage_term_mode', 'overconsumption_term_mode', 
+ 'usage_overconsumption_price', 'usage_overconsumption_periodicity', 'usage_term_mode', 'overconsumption_term_mode', 
  'effective_date', 'billing_start_date', 'billing_modality_notes',
- 'reval_method', 'reval_rate', 'reval_formula', 'reval_compute_when', 'reval_apply_when',
+ 'reval_method', 'reval_rate_per', 'reval_formula', 'reval_compute_when', 'reval_apply_when', "reval_apply_from",
        'reval_source',  
        'evidence_product', 'evidence_price', 'evidence_payment_methods',
        'evidence_usage', 'evidence_revalorization', 'evidence_billing',
        'evidence_dates', 'evidence_company', 'confidence_price',
        'confidence_usage', 'confidence_revalorization', 'confidence_billing',
        'confidence_dates', 'confidence_company'
-       ]
+       ] 
 df=df.fillna("null")
 df[col_order].to_markdown("product.md", index=False)
 # df.to_csv("products.csv", index=False)
