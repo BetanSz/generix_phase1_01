@@ -128,7 +128,7 @@ df = pd.json_normalize(data["products"])
 
 col_order  = ['company_name', "numero_de_contrat" ,'signature_date_cg', 'signature_date_cp', 'product_code', 'product_name',
               'duree_de_service',  'duree_de_service_notes', "date_end_of_contract" ,'reconduction_tacite','term_mode', 'billing_frequency', "bon_de_command" ,'payment_methods', 'payment_terms', "debut_facturation",
- 'price_unitaire',"quantity","loyer","loyer_facturation","loyer_annuele",'devise_de_facturation', 'price_periodicity', 'one_shot_service', 'tax_basis','is_included',
+ 'price_unitaire',"quantity","loyer","loyer_facturation","loyer_annuele",'devise_de_facturation', 'loyer_periodicity', 'one_shot_service', 'tax_basis','is_included',
  'usage_overconsumption_price', 'usage_overconsumption_periodicity', 'usage_term_mode', 'overconsumption_term_mode', "usage_notes",
  'service_start_date', 'billing_start_date', 'billing_modality_notes',
  'reval_method', 'reval_rate_per', 'reval_formula', 'reval_compute_when', 'reval_apply_when', "reval_apply_from",

@@ -44,10 +44,10 @@ This information is by default in the GC, and sometimes it's changed in the CP. 
 - debut_facturation (string|null) — Event that triggers consumptions billing start (e.g., "PV VABF").
 - duree_de_service (number or string|null) — Numeric duration in months or "indeterminé". If possible read the CP “Durée des Services …” line.
 Put the numeric into duree_de_service and any remainder (e.g., “+ prorata de la période en cours”) into duree_de_service_notes. If absent in CP, fallback to CG; else null.
-- duree_de_service_notes (string|null) — Any non-numeric tail (e.g., "+ prorata de la période en cours").
+- duree_de_service_notes (string|null) — Any non-numeric tail near duree_de_service data (e.g., "+ prorata de la période en cours").
 - date_end_of_contract (number|null) - this is a derived quantity: it's debut_facturation + duree_de_service. Note that debut_facturation is usually a date
 and duree_de_service is usually in months. If the contract if of duree indeterminé or has reconduction_tacite=True then there is no end to the contract.
-In this case put the year 31 dec 2099.
+Only in this case put the year 31 dec 2099. Otherwsie, if any of the two required debut_facturation or duree_de_service is unknwon, put "unknown".
 - term_mode (À échoir, Échu or null) — Billing mode for base subscription, possibly present in the “Terme” column.
 For overconsumption lines, set overconsumption_term_mode accordingly.
 
@@ -63,11 +63,13 @@ Si absente → null.
 - loyer (number|null) — This is the final price of a product, usually in the form of price_unitaire per quantity.
 - loyer_facturation (number|null) — This is a calculated magnitude. Is the loyer at facturation time. For example if the loyer is mensuel and the
 facturation time is trimestriel, loyer_facturation = loyer * 3. Note that if the loyer is not mensuel then it's necessary to first obtain
-the loyer mensuel by dividing the presented loyer by the amount of months considered and then apply this calculated value in the formula
+the loyer mensuel by dividing the presented loyer by the amount of months considered and then apply this calculated value in the formula.
+Also note that without loyer_periodicity it is not possible to calculate this dervied magntiude, and thus leave this colums as "unknown".
 - loyer_annuele (number|null) — This is a calculated magnitude. Is the loyer at the end of the year. For example if the loyer is mensuel then
 loyer_facturation = loyer * 12. Note that if the loyer is not mensuel then it's necessary to first obtain
 the loyer mensuel by dividing the presented loyer by the amount of months considered and then apply this calculated value in the formula
-- price_periodicity (enum: monthly | quarterly | annual | other | null) — Cadence attached to the price row (e.g., “Loyer mensuel”). If not stated on that row,
+Also note that without loyer_periodicity it is not possible to calculate this dervied magntiude, and thus leave this colums as "unknown".
+- loyer_periodicity (enum: monthly | quarterly | annual | other | null) — Cadence attached to the price row (e.g., “Loyer mensuel”). If not stated on that row,
  leave null. Do not copy billing cadence here.
 - one_shot_service (bool|null) — True if one shot product, payed only once, if explicitly listed. Otherwise False
 - bon_de_command (bool|null) - If the pourchase number (bon commande) appears in the contract. Binary value (Yes/No)
@@ -84,7 +86,7 @@ usually stated next to the overconsumption price.
 
 * Facturation and payment modes
 - billing_frequency (e.g. Trimestrielle, Annuelle) — Preferently from CP “Modalités de facturation” checkbox, otherwise from CG.
-Note: Different from price_periodicity. A product can have Loyer mensuel but invoices are issued Trimestrielle.
+Note: Different from loyer_periodicity. A product can have Loyer mensuel but invoices are issued Trimestrielle.
 - payment_methods (array of enums: virement | prelevement | cheque | other) — Only the checked ☒ methods. Do not include unchecked.
 If additional details are present such as “A 45 jours date de facture” add them in payment_terms. Note that the SOUSCRIPTION contract overwrites the CADRE contract, use the latter.
 If price_amount is "not applicable" then put the payment_methods also to "not applicable".
@@ -166,7 +168,7 @@ tools = [{
                             "loyer_annuele": { "type": ["number","null"] },
                             
                             
-                            "price_periodicity": { "type": ["string","null"], "enum": ["Mensuelle","Trimestrielle","Annuelle","Autre", "unknown"] },
+                            "loyer_periodicity": { "type": ["string","null"], "enum": ["Mensuelle","Trimestrielle","Annuelle","Autre", "unknown"] },
 
                             # --- One-time ---
                             "one_shot_service": { "type": ["boolean"] },

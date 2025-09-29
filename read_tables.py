@@ -22,6 +22,6 @@ for i, doc in enumerate(items, start=1):
     df_list.append(df)
 result_df = pd.concat(df_list)
 
-embed()
+#embed()
 cols2save = [col for col in df.columns if "evidence" not in col]
 result_df[cols2save].to_markdown("result_all.md", index=False)
