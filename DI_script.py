@@ -72,9 +72,10 @@ analyse_doc_model = "prebuilt-read"
 analyse_doc_model = "prebuilt-layout"
 #pdfs=['M/caloteries/b/Calottiers 201706 058931.pdf']
 pdfs = [pdf for pdf in pdfs if "New contracts" in pdf]
+#pdfs = [pdf for pdf in pdfs if "Old contracts" in pdf]
 embed()
 
-for i, pdf_name in enumerate(pdfs):
+for i, pdf_name in enumerate(pdfs, start=1):
     print(f"processing....{i}/{len(pdfs)}", pdf_name)
     #breakpoint()
     pdf_bytes = container.download_blob(pdf_name).readall()

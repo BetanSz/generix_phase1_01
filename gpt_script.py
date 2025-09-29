@@ -7,17 +7,21 @@ import textwrap
 import json
 import sys
 
-from clients import cosmos_digitaliezd, client_oai
+from clients import cosmos_digitaliezd, client_oai, cosmos_table
 from gpt_prompt import *
 import json, ast, re
 import pandas as pd
+import numpy as np
 
 def truncate_after_flag(text, annex_flag):
     if len(list(re.finditer(annex_flag, text, flags=re.IGNORECASE)))==1:
         i = text.find(annex_flag)
         if i!= -1:
             print("Safe truncation executed")
-            return text[:i]
+            print("len before truncation =", len(text))
+            text = text[:i]
+            print("len after truncation =", len(text))
+            return text
         else:
             print("Annex flag was not found. No truncation took place")
             return text
@@ -26,15 +30,23 @@ def truncate_after_flag(text, annex_flag):
         return text
 
 
+def build_response_id(text):
+    stem = Path(text).stem                        # drop extension
+    base = re.split(r'-(?:CG|CP|CONTRAT-CADRE|CONTRAT-SOUSCRIPTION)|_gcr_contrat-de-souscription|__contrat_cadre_saas\b',
+                     stem, 1, flags=re.IGNORECASE)[0]
+    return base 
+
+
 items = cosmos_digitaliezd.read_all_items(max_item_count=100)
 for i, doc in enumerate(items, start=1):
     print(i, doc["id"]) #, doc.get("blob_path")
 
-#embed()
+embed()
 company_name = "S.N.F"
 #company_name = "NORAUTO" # ok after truncation
 #company_name = "SAVENCIA"
 #company_name = "BOIRON"
+#company_name = "AIRBUS-HELICOPTERS"
 doc_ids = list(cosmos_digitaliezd.query_items(
     query="SELECT VALUE c.id FROM c WHERE CONTAINS(c.id, @kw, true) AND ENDSWITH(c.id, '.pdf')",
     parameters=[{"name": "@kw", "value": company_name}],
@@ -47,22 +59,24 @@ docs = [cosmos_digitaliezd.read_item(item=i, partition_key=i) for i in doc_ids]
 for doc in docs:
     print(doc["id"], doc.get("blob_path"), doc.get("page_count"))
 
-content_cadre = [doc.get("content", "") for doc in docs if "CADRE".lower() in doc["id"].lower()]
-content_sous = [doc.get("content", "") for doc in docs if "SOUSCRIPTION".lower() in doc["id"].lower()]
+content_cadre = [doc.get("content", "") for doc in docs if "CADRE".lower() in doc["id"].lower() or "CG".lower() in doc["id"].lower()]
+content_sous = [doc.get("content", "") for doc in docs if "SOUSCRIPTION".lower() in doc["id"].lower() or "CP".lower() in doc["id"].lower()]
 assert len(content_cadre)>=1 and len(content_sous)>=1
 annex_flag = "Annexe 1 :"
-if len(content_cadre)==1 and len(content_sous)==1:
-    content_cadre_str = content_cadre[0]
-    content_sous_str = content_sous[0]
-    print("len content [cadre, sous]=", len(content_cadre_str), len(content_sous_str))
-    content_sous_str = truncate_after_flag(content_sous_str, annex_flag)
-    print("len content [cadre, sous]=", len(content_cadre_str), len(content_sous_str))
-elif len(content_cadre)==1 and len(content_sous)>=1:
-    content_cadre_str = content_cadre[0]
-    content_sous = [truncate_after_flag(text, annex_flag) for text in content_sous]
-    content_sous_str = "\n".join(content_sous) 
-else:
-    print("TODO")
+
+def process_docs(content_cadre, content_sous, annex_flag="Annexe 1 :"):
+    if len(content_cadre)==1 and len(content_sous)==1:
+        content_cadre_str = content_cadre[0]
+        content_sous_str  = truncate_after_flag(content_sous[0], annex_flag)
+        return content_cadre_str, content_sous_str
+    elif len(content_cadre)==1 and len(content_sous)>=1:
+        content_cadre_str = content_cadre[0]
+        content_sous_str  = "\n".join(truncate_after_flag(t, annex_flag) for t in content_sous)
+        return content_cadre_str, content_sous_str
+    else:
+        raise ValueError("Unexpected lengths.")
+
+content_cadre_str, content_sous_str = process_docs(content_cadre, content_sous, annex_flag)
 
 content = (
     "=== DOC: CADRE — type=cadre ===\n"
@@ -75,7 +89,7 @@ messages = [
     {"role": "system", "content": financial_prompt},
     {"role": "user", "content": f"DOCUMENT CONTENT:\n\n{content}\n\nTASK:\n{user_question}"}
 ]
-# --- call Azure OpenAI (model = deployment name)
+
 embed()
 resp = client_oai.chat.completions.create(
     model="gpt-4.1",               # your deployment name from the portal
@@ -110,13 +124,13 @@ data = json.loads(args_str)
 print(json.dumps(data, indent=2, ensure_ascii=False))
 
 df = pd.json_normalize(data["products"])
-print(df.to_markdown(index=False))
+#print(df.to_markdown(index=False))
 
-col_order  = ['company_name', 'signature_date_cg', 'signature_date_cp', 'product_code', 'product_name',
-              'duree_de_service',  'duree_de_service_notes', 'term_mode', 'billing_frequency', "bon_de_command" ,'payment_methods', 'payment_terms', "debut_facturation",
- 'price_unitaire',"quantity","loyer",'devise_de_facturation', 'price_periodicity', 'one_shot_service', 'tax_basis','is_included_or_free',
- 'usage_overconsumption_price', 'usage_overconsumption_periodicity', 'usage_term_mode', 'overconsumption_term_mode', 
- 'effective_date', 'billing_start_date', 'billing_modality_notes',
+col_order  = ['company_name', "numero_de_contrat" ,'signature_date_cg', 'signature_date_cp', 'product_code', 'product_name',
+              'duree_de_service',  'duree_de_service_notes', "date_end_of_contract" ,'reconduction_tacite','term_mode', 'billing_frequency', "bon_de_command" ,'payment_methods', 'payment_terms', "debut_facturation",
+ 'price_unitaire',"quantity","loyer","loyer_facturation","loyer_annuele",'devise_de_facturation', 'price_periodicity', 'one_shot_service', 'tax_basis','is_included',
+ 'usage_overconsumption_price', 'usage_overconsumption_periodicity', 'usage_term_mode', 'overconsumption_term_mode', "usage_notes",
+ 'service_start_date', 'billing_start_date', 'billing_modality_notes',
  'reval_method', 'reval_rate_per', 'reval_formula', 'reval_compute_when', 'reval_apply_when', "reval_apply_from",
        'reval_source',  
        'evidence_product', 'evidence_price', 'evidence_payment_methods',
@@ -124,12 +138,35 @@ col_order  = ['company_name', 'signature_date_cg', 'signature_date_cp', 'product
        'evidence_dates', 'evidence_company', 'confidence_price',
        'confidence_usage', 'confidence_revalorization', 'confidence_billing',
        'confidence_dates', 'confidence_company'
-       ] 
+       ]
+
+def validate_columns(df, col_order):
+    missing = [c for c in df.columns if c not in col_order]
+    extra   = [c for c in col_order if c not in df.columns]
+    print(len(df.columns), len(col_order))
+    if missing or extra:
+        print("Missing-from-col_order:", missing)
+        print("Missing-from-df (extra in col_order):", extra)
+        raise ValueError("Column mismatch between df and col_order")
+
+validate_columns(df, col_order)
+
 df=df.fillna("null")
 df[col_order].to_markdown("product.md", index=False)
-# df.to_csv("products.csv", index=False)
-# df.to_excel("contract_products.xlsx", sheet_name="Products", index=False)
-# pd.set_option("display.max_columns", None)   # show all columns
-# pd.set_option("display.width", 0)            # auto-detect console width
-# pd.set_option("display.max_colwidth", None)  # don't truncate cell text
-# pd.set_option("display.expand_frame_repr", False)  # single-line wide frames
+
+df2json = df.replace({np.nan: None})
+rows = json.loads(df2json.to_json(orient="records"))
+index_candidates = set([build_response_id(pdf).lower() for pdf in doc_ids])
+if len(index_candidates)==1:
+    id = index_candidates.pop()
+else:
+    print("elegent id generation failed")
+    id = index_candidates.pop()
+print("id of contract:", id)
+#embed()
+
+batch = {
+    "id": id,
+    "rows": rows
+}
+cosmos_table.upsert_item(batch)
