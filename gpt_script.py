@@ -41,26 +41,32 @@ items = cosmos_digitaliezd.read_all_items(max_item_count=100)
 for i, doc in enumerate(items, start=1):
     print(i, doc["id"]) #, doc.get("blob_path")
 
-embed()
+#embed()
 company_name = "S.N.F"
 #company_name = "NORAUTO" # ok after truncation
 #company_name = "SAVENCIA"
 #company_name = "BOIRON"
 #company_name = "AIRBUS-HELICOPTERS"
+company_name = "CULTURA"
 doc_ids = list(cosmos_digitaliezd.query_items(
     query="SELECT VALUE c.id FROM c WHERE CONTAINS(c.id, @kw, true) AND ENDSWITH(c.id, '.pdf')",
     parameters=[{"name": "@kw", "value": company_name}],
     enable_cross_partition_query=True
 ))
+doc_ids = [doc for doc in doc_ids if "-ASP-" not in doc]
 print(doc_ids)
+print(len(doc_ids))
 
 #doc = cosmos_digitaliezd.read_item(item=doc_id, partition_key=doc_id)
 docs = [cosmos_digitaliezd.read_item(item=i, partition_key=i) for i in doc_ids]
 for doc in docs:
     print(doc["id"], doc.get("blob_path"), doc.get("page_count"))
 
+#TODO: This is getting very fragile...
 content_cadre = [doc.get("content", "") for doc in docs if "CADRE".lower() in doc["id"].lower() or "CG".lower() in doc["id"].lower()]
 content_sous = [doc.get("content", "") for doc in docs if "SOUSCRIPTION".lower() in doc["id"].lower() or "CP".lower() in doc["id"].lower()]
+content_avenant = [doc.get("content", "") for doc in docs if "AVENANT-".lower() in doc["id"].lower()]
+print(len(content_cadre), len(content_sous), len(content_avenant))
 assert len(content_cadre)>=1 and len(content_sous)>=1
 annex_flag = "Annexe 1 :"
 
@@ -77,12 +83,16 @@ def process_docs(content_cadre, content_sous, annex_flag="Annexe 1 :"):
         raise ValueError("Unexpected lengths.")
 
 content_cadre_str, content_sous_str = process_docs(content_cadre, content_sous, annex_flag)
+content_avenant = []
+content_avenant_str = " ".join(content_avenant)
 
 content = (
     "=== DOC: CADRE — type=cadre ===\n"
     + content_cadre_str.strip() + "\n\n"
     + "=== DOC: SOUSCRIPTION — type=souscription ===\n"
     + content_sous_str.strip()
+    + "=== DOC: AVENANT — type=avenant ===\n"
+    + content_avenant_str
 )
 user_question = "Extract the products found in the contract with their financial conditions using the rules and return products via the tool."
 messages = [
@@ -96,7 +106,7 @@ resp = client_oai.chat.completions.create(
     messages=messages,
     tools=tools,
     tool_choice="auto",
-    temperature=0.0,
+    temperature=0.2, #0
     max_tokens=7000,
 )
 
@@ -137,7 +147,7 @@ col_order  = ['company_name', "numero_de_contrat" ,'signature_date_cg', 'signatu
        'evidence_usage', 'evidence_revalorization', 'evidence_billing',
        'evidence_dates', 'evidence_company', 'confidence_price',
        'confidence_usage', 'confidence_revalorization', 'confidence_billing',
-       'confidence_dates', 'confidence_company'
+       'confidence_dates', 'confidence_company', 'confidece_avenant'
        ]
 
 def validate_columns(df, col_order):
@@ -152,7 +162,9 @@ def validate_columns(df, col_order):
 validate_columns(df, col_order)
 
 df=df.fillna("null")
-df[col_order].to_markdown("product.md", index=False)
+df[col_order].to_markdown("product_b.md", index=False)
+df.to_markdown("product_raw.md", index=False)
+print("output shape = ",df.shape)
 
 df2json = df.replace({np.nan: None})
 rows = json.loads(df2json.to_json(orient="records"))

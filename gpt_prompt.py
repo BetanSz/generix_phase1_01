@@ -17,21 +17,27 @@ You extract ONLY the financial and billing information from the provided CONTEXT
 - Older contracts are before 2023.
 
 Precedence:
-- If AVENANT specifies a value, AVENANT overrides CP.
 - If CP specifies a value, CP overrides CG.
 - If CP is silent, fall back to CG.
 - If all are silent/ambiguous, set null.
 - Include products even if free/included (e.g., SLA); they still get a row.
+- Treat each product present in the AVENANT section as separate products, even if they repeat with respect to the CP. 
+Consider the information of each avenant to define the finantial conditions therein.
 
 Main Objectives:
 - Your main objective is to identify the products present in the contract and recuperate the items defined in the Scope to extract.
 - Keep original language of quotes (FR/EN). Output currency as ISO (EUR, USD, GBP, CHF, CAD, AUD, JPY). No conversions.
-- Products & rows: Create exactly one product row for each line in the CP sections and AVENANT sections if present. They are usually found in “Abonnement …” and “Services associés/Options”. 
+- Products & rows: Create exactly one product row for each line in the CP sections. They are usually found in “Abonnement …” and “Services associés/Options”. 
 Include lines marked Inclus/Gratuit/Compris with is_included=true and price_amount=null.
+- Additionaly, create a product row for each product present in the avenant. For each one of these rows, the avenant overridees original CP information.
+Product description or code may repeat a product alrady present in the CP. Keep all of them. Products in the avenant are usually found under "2 ARTICLE 5.2 - ABONNEMENT"
 - If a value is not present or unclear, set null. Do not guess. Do not compute totals.
-- If the "Niveau de Service (SLA)" is present, add it as an additional product including the code. Most details about this product will remain empty
+- If the "Niveau de Service (SLA)" is present, add it as an additional product including the code. Most details about this product will remain empty.
 
-The fields to extract are the following:
+Note that the presence of avenants may imply having several rows for a single product type. Avenant history must be saved in the form of the product rows.
+Order the rows chronologically using the signature date: first the products as defined in the CP and then the products as defined in the avenant.
+
+The fields to extract are the following (scope to extract):
 
 * Contract / affair (repeat on every product row)
 - company_name (string) — Client legal name from CP “Raison sociale du Client”. If absent, fall back to CG; else null.
@@ -52,8 +58,8 @@ reconduction tacie, meaning it will automatically renew itself. This information
 - date_end_of_contract (number|null) - This is a derived quantity, not present in the contract per se: it's the signature date + duree_de_service + prorata, if any.
 The signature date is a date always present in the contract. duree_de_service is usually in months. prorata must be calculated as the difference in month between the signature date and the end of that year.
 Therefore, to calculate date_end_of_contract sum to the signature date the months of duree_de_service and prorata (if present).
-If the contract is of duree indeterminé or has reconduction_tacite=True then there is no end to the contract. Only in this case put the year 31 dec 2099.
-Otherwsie, if any of the two required fields (signature date, duree_de_service) is unknwon, put "unknown".
+If the contract is of duree "indetermine" or has reconduction_tacite=True then there is no end to the contract. Only in this case put the year "31 dec 2099".
+Otherwsie, if any of the two required fields (signature date, duree_de_service) is unknwon and reconduction_tacite=False, put "unknown".
 - term_mode (À échoir, Échu or null) — Billing mode for base subscription, possibly present in the “Terme” column.
 For overconsumption lines, set overconsumption_term_mode accordingly.
 
@@ -124,7 +130,7 @@ product code, then the product description is similar), write a very short summa
 - Produce a float score in [0,1] based on how confident are the obtained values.
 - Positive influence of score: explicitness & proximity, clear evidence in CP.
 - Negative influence of socre: contradictions or incertinty within the document, missing data in document, conflict between the CG and CP, ambiguous wording, conflicting figures without clear precedence, inference from distant headers only, obvious OCR garbling.
-- confidece avenant: avenant overrides a product already present in the contract or explictly defined a new product or engagment. Dates of avenants
+- confidece_avenant: avenant overrides a product already present in the contract or explictly defined a new product or engagment. Dates of avenants
 are in the future with respect to the CP or CG. In general prices present in the avenant are higher than the original ones found in the contract.
 Attribute a low confidence value if these conditions are not satisfied.
 
@@ -153,8 +159,6 @@ tools = [{
                             "numero_de_contrat": { "type": ["number","null"] },
                             "reconduction_tacite": { "type": ["boolean","null"] },
                             
-                            
-
                             # --- devise_de_facturation & tax ---
                             "devise_de_facturation": { "type": "string", "enum": ["EUR","USD","GBP","CHF","CAD","AUD","JPY"] },
                             "tax_basis": { "type": ["string","null"], "enum": ["HT","TTC", "unknown"] },
@@ -182,7 +186,6 @@ tools = [{
                             "loyer_annuele": { "type": ["number","null"] },
                             "loyer_periodicity": { "type": ["string","null"], "enum": ["Mensuelle","Trimestrielle","Annuelle","Autre", "unknown"] },
                             "total_abbonement_mensuel": { "type": ["number","null"] },
-                            
 
                             # --- One-time ---
                             "one_shot_service": { "type": ["boolean"] },
@@ -223,15 +226,15 @@ tools = [{
                             "evidence_date_end_of_contract": { "type": ["string","null"] },
                             "evidence_avenant": { "type": ["string","null"] },
                             
-                            
-
                             # --- Confidences (0–1) ---
                             "confidence_price": { "type": ["number","null"], "minimum": 0, "maximum": 1 },
                             "confidence_usage": { "type": ["number","null"], "minimum": 0, "maximum": 1 },
                             "confidence_revalorization": { "type": ["number","null"], "minimum": 0, "maximum": 1 },
                             "confidence_billing": { "type": ["number","null"], "minimum": 0, "maximum": 1 },
                             "confidence_dates": { "type": ["number","null"], "minimum": 0, "maximum": 1 },
-                            "confidence_company": { "type": ["number","null"], "minimum": 0, "maximum": 1 }
+                            "confidence_company": { "type": ["number","null"], "minimum": 0, "maximum": 1 },
+                            "confidece_avenant": { "type": ["number","null"], "minimum": 0, "maximum": 1 }
+                            
                         },
                         "required": ["product_name", "is_included", "devise_de_facturation"]
                     }
