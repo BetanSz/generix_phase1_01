@@ -10,20 +10,23 @@ import json
 
 
 financial_prompt = """
-You extract ONLY the financial and billing information from the provided CONTEXT. CONTEXT will include two documents:
-- CG = Conditions Générales (cadre)
-- CP = Conditions Particulières (souscription)
+You extract ONLY the financial and billing information from the provided CONTEXT. CONTEXT will include three document types, which compose a single contract:
+- One CG = Conditions Générales (cadre): general default contract conditions.
+- One CP = Conditions Particulières (souscription): specific client vdeefined contract conditions
+- Possibly many AVENANTS: updates, improvments or modifications of the CP.
+- Older contracts are before 2023.
 
 Precedence:
+- If AVENANT specifies a value, AVENANT overrides CP.
 - If CP specifies a value, CP overrides CG.
 - If CP is silent, fall back to CG.
-- If both are silent/ambiguous, set null.
+- If all are silent/ambiguous, set null.
 - Include products even if free/included (e.g., SLA); they still get a row.
 
 Main Objectives:
 - Your main objective is to identify the products present in the contract and recuperate the items defined in the Scope to extract.
 - Keep original language of quotes (FR/EN). Output currency as ISO (EUR, USD, GBP, CHF, CAD, AUD, JPY). No conversions.
-- Products & rows: Create exactly one product row for each line in CP sections, possibly found in “Abonnement …” and “Services associés/Options”. 
+- Products & rows: Create exactly one product row for each line in the CP sections and AVENANT sections if present. They are usually found in “Abonnement …” and “Services associés/Options”. 
 Include lines marked Inclus/Gratuit/Compris with is_included=true and price_amount=null.
 - If a value is not present or unclear, set null. Do not guess. Do not compute totals.
 - If the "Niveau de Service (SLA)" is present, add it as an additional product including the code. Most details about this product will remain empty
@@ -40,20 +43,24 @@ This information is by default in the GC, and sometimes it's changed in the CP. 
 - signature_date_cg (date|null) — Signature date of CG, if present.
 - signature_date_cp (date|null) — Signature date of CP, if present.
 - service_start_date (string date|null) — Start date of services if a concrete date is written. Do not invent.
-- billing_start_date (string date|null) — If a specific billing start date is written. If the start is an event (e.g.,procede verbal: PV VABF), leave billing_start_date null and set debut_facturation.
-- debut_facturation (string|null) — Event that triggers consumptions billing start (e.g., "PV VABF").
-- duree_de_service (number or string|null) — Numeric duration in months or "indeterminé". If possible read the CP “Durée des Services …” line.
-Put the numeric into duree_de_service and any remainder (e.g., “+ prorata de la période en cours”) into duree_de_service_notes. If absent in CP, fallback to CG; else null.
+- debut_facturation (string|null) — Write a specific billing start date if available. If the start is an event (e.g.,procede verbal: PV VABF, GO), put that instead.
+In a given contract, different products may have different billing start dates.
+- duree_de_service (number or string|null) — Numeric duration in months or "indeterminé". If possible read the CP “Durée des Services …” line, if absent in CP, fallback to CG.
+Any additional remainder such as (e.g., “+ prorata de la période en cours”) put into duree_de_service_notes. This value is "indeterminé" if the contract is of type
+reconduction tacie, meaning it will automatically renew itself. This information is usually in the CG, found mostly in old contracts.
 - duree_de_service_notes (string|null) — Any non-numeric tail near duree_de_service data (e.g., "+ prorata de la période en cours").
-- date_end_of_contract (number|null) - this is a derived quantity: it's debut_facturation + duree_de_service. Note that debut_facturation is usually a date
-and duree_de_service is usually in months. If the contract if of duree indeterminé or has reconduction_tacite=True then there is no end to the contract.
-Only in this case put the year 31 dec 2099. Otherwsie, if any of the two required debut_facturation or duree_de_service is unknwon, put "unknown".
+- date_end_of_contract (number|null) - This is a derived quantity, not present in the contract per se: it's the signature date + duree_de_service + prorata, if any.
+The signature date is a date always present in the contract. duree_de_service is usually in months. prorata must be calculated as the difference in month between the signature date and the end of that year.
+Therefore, to calculate date_end_of_contract sum to the signature date the months of duree_de_service and prorata (if present).
+If the contract is of duree indeterminé or has reconduction_tacite=True then there is no end to the contract. Only in this case put the year 31 dec 2099.
+Otherwsie, if any of the two required fields (signature date, duree_de_service) is unknwon, put "unknown".
 - term_mode (À échoir, Échu or null) — Billing mode for base subscription, possibly present in the “Terme” column.
 For overconsumption lines, set overconsumption_term_mode accordingly.
 
 * Product identification
 - product_name (string, required) — Line label (“Libellé”) in CP pricing sections.
 - product_code (string|null) — “Code” in the same row if present. Put only the code number, any additional description belongs to product_name.
+Older contracts tend to not have the product code.
 - is_included (boolean, required) — True when the row shows Inclus/Gratuit/Compris/0; then set price_unitaire=null (or 0 only if literally “0”).
 - price_unitaire (number|null) — Take the unitary price cell on the same row (normalize FR numbers) if possible.
 If the cell is “Inclus/Gratuit/Compris/0”, set is_included=true and price_unitaire=null (or 0 if explicitly “0”).
@@ -71,6 +78,8 @@ the loyer mensuel by dividing the presented loyer by the amount of months consid
 Also note that without loyer_periodicity it is not possible to calculate this dervied magntiude, and thus leave this colums as "unknown".
 - loyer_periodicity (enum: monthly | quarterly | annual | other | null) — Cadence attached to the price row (e.g., “Loyer mensuel”). If not stated on that row,
  leave null. Do not copy billing cadence here.
+- total_abbonement_mensuel (number|null): the total value of the contract or the sum of product if present in the contract (or avenant). Only consider
+mensual values if present in the contract. Do not calculate do not guess.
 - one_shot_service (bool|null) — True if one shot product, payed only once, if explicitly listed. Otherwise False
 - bon_de_command (bool|null) - If the pourchase number (bon commande) appears in the contract. Binary value (Yes/No)
 
@@ -106,12 +115,18 @@ If price_amount is "not applicable" then put the payment_methods also to "not ap
 - evidence_product / evidence_price / evidence_payment_methods / evidence_usage / evidence_revalorization / evidence_billing / evidence_dates / evidence_company (string|null) — 
 - Concise quotes taken from the same row/box that justified the value for each case. Put reference [CG] or [CP] from which contract was obtained and page number. Replace internal newlines with spaces.
 - evidence_price — Short quote showing “Prix unitaire” times "quantity" = “Loyer mensuel” if available for context.
+- evidence_date_end_of_contract: Write the referrence to the 3 dates that compose this derived quantity: signature date, duree_de_service and prorate (it found).
+- evidence_avenant: when a product has been modfied by an avenant (data comes from an avenant file, the product code is the same or if there's no
+product code, then the product description is similar), write a very short summary detailing old costs versus new costs. If possible write the difference as well.
 
 * Confidence (0-1; null if the field is null)
 - confidence_price / confidence_usage / confidence_revalorization / confidence_billing / confidence_dates / confidence_company (number|null)
 - Produce a float score in [0,1] based on how confident are the obtained values.
 - Positive influence of score: explicitness & proximity, clear evidence in CP.
 - Negative influence of socre: contradictions or incertinty within the document, missing data in document, conflict between the CG and CP, ambiguous wording, conflicting figures without clear precedence, inference from distant headers only, obvious OCR garbling.
+- confidece avenant: avenant overrides a product already present in the contract or explictly defined a new product or engagment. Dates of avenants
+are in the future with respect to the CP or CG. In general prices present in the avenant are higher than the original ones found in the contract.
+Attribute a low confidence value if these conditions are not satisfied.
 
 
 Output:
@@ -146,7 +161,6 @@ tools = [{
 
                             # --- Dates & term ---
                             "service_start_date": { "type": ["string","null"] },
-                            "billing_start_date": { "type": ["string","null"] },
                             "debut_facturation": { "type": ["string","null"] },
                             "signature_date_cg": { "type": ["string","null"] },
                             "signature_date_cp": { "type": ["string","null"] },
@@ -166,9 +180,9 @@ tools = [{
                             "loyer": { "type": ["number","null"] },
                             "loyer_facturation": { "type": ["number","null"] },
                             "loyer_annuele": { "type": ["number","null"] },
-                            
-                            
                             "loyer_periodicity": { "type": ["string","null"], "enum": ["Mensuelle","Trimestrielle","Annuelle","Autre", "unknown"] },
+                            "total_abbonement_mensuel": { "type": ["number","null"] },
+                            
 
                             # --- One-time ---
                             "one_shot_service": { "type": ["boolean"] },
@@ -206,6 +220,9 @@ tools = [{
                             "evidence_dates": { "type": ["string","null"] },
                             "evidence_company": { "type": ["string","null"] },
                             "evidence_payment_methods": { "type": ["string","null"] },
+                            "evidence_date_end_of_contract": { "type": ["string","null"] },
+                            "evidence_avenant": { "type": ["string","null"] },
+                            
                             
 
                             # --- Confidences (0–1) ---

@@ -9,6 +9,9 @@ pip install fastapi uvicorn
 pip install pandas
 pip install openpyxl 
 pip install tabulate
+
+
+
 """
 import os, uuid
 import os, re
@@ -17,6 +20,7 @@ from IPython import embed
 from clients import client_di, container, cosms_db, cosmos_digitaliezd
 from pathlib import Path
 from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
+from azure.core.exceptions import HttpResponseError, ServiceRequestError, ServiceResponseError
 
 def parse_blob_path(path: str):
     """
@@ -68,12 +72,15 @@ MAX_EMBED_CHARS = 6000  # simple guard to avoid very long inputs
 pdfs = [b.name for b in container.list_blobs() if b.name.lower().endswith(".pdf")]
 print("found in blob:", pdfs)
 
-analyse_doc_model = "prebuilt-read"
-analyse_doc_model = "prebuilt-layout"
+
 #pdfs=['M/caloteries/b/Calottiers 201706 058931.pdf']
-pdfs = [pdf for pdf in pdfs if "New contracts" in pdf]
+#pdfs = [pdf for pdf in pdfs if "New contracts" in pdf]
+pdfs = [pdf for pdf in pdfs if "CULTURA" in pdf]
+print("number of pdf = ", len(pdfs))
 #pdfs = [pdf for pdf in pdfs if "Old contracts" in pdf]
 embed()
+analyse_doc_model = "prebuilt-read"
+analyse_doc_model = "prebuilt-layout"
 
 for i, pdf_name in enumerate(pdfs, start=1):
     print(f"processing....{i}/{len(pdfs)}", pdf_name)
@@ -81,30 +88,36 @@ for i, pdf_name in enumerate(pdfs, start=1):
     pdf_bytes = container.download_blob(pdf_name).readall()
     #poller = client_di.begin_analyze_document(analyse_doc_model, pdf_bytes)
     #embed()
-    poller = client_di.begin_analyze_document(
-        analyse_doc_model,
-        pdf_bytes,
-        output_content_format="markdown"
-    )
-    res = poller.result()
-    text = res.content
-    folder_strct_dict = parse_blob_path(pdf_name)
-    payload = {
-        "id": slugify_path(pdf_name),
-        "title": os.path.basename(pdf_name),
-        "content": res.content or "",
-        "file_path": os.path.abspath(pdf_name),
-        "language": (res.languages[0].locale if res.languages else "unknown"),
-        "page_count": len(res.pages),
-        "analyse_doc_model": analyse_doc_model,
-        "company_letter": folder_strct_dict["letter"],
-        "company_name": folder_strct_dict["company"],
-        "company_affair": folder_strct_dict["affair"],
-        "company_name_path": folder_strct_dict["company_key"],
-        "company_affair_path": folder_strct_dict["affair_key"],
-    }
-    docs.append(payload)
-    cosmos_digitaliezd.upsert_item(payload)
+    try:
+        poller = client_di.begin_analyze_document(
+            analyse_doc_model,
+            pdf_bytes,
+            output_content_format="markdown"
+        )
+        res = poller.result()
+        text = res.content
+        folder_strct_dict = parse_blob_path(pdf_name)
+        print("contract structure looks like this...")
+        print(folder_strct_dict)
+        payload = {
+            "id": slugify_path(pdf_name),
+            "title": os.path.basename(pdf_name),
+            "content": res.content or "",
+            "file_path": os.path.abspath(pdf_name),
+            "language": (res.languages[0].locale if res.languages else "unknown"),
+            "page_count": len(res.pages),
+            "analyse_doc_model": analyse_doc_model,
+            "company_letter": folder_strct_dict["letter"],
+            "company_name": folder_strct_dict["company"],
+            "company_affair": folder_strct_dict["affair"],
+            "company_name_path": folder_strct_dict["company_key"],
+            "company_affair_path": folder_strct_dict["affair_key"],
+        }
+        docs.append(payload)
+        cosmos_digitaliezd.upsert_item(payload)
+    except HttpResponseError as e:
+        print("ERROR!")
+        print(e)
 
 #local_path = "C:\\Users\\EstebanSzames\\OneDrive - CELLENZA\\Bureau\\Generix\\generix_phase1_01\\doc_digitalized_sample\\"
 #for doc_payload in docs:
@@ -112,7 +125,7 @@ for i, pdf_name in enumerate(pdfs, start=1):
 #        f.write(doc_payload.get("content",""))
 #breakpoint()
 #embed()
-layout_price_page = 0.008626 #e
+layout_price_page = 8.626/1000
 doc_pages = [doc["page_count"] for doc in docs]
 doc_mean = sum(doc_pages)/len(doc_pages)
 print("mean pages per contract = ", doc_mean)
