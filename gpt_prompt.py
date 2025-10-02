@@ -90,7 +90,7 @@ You extract ONLY the financial and billing information from the provided CONTEXT
 - Possibly many AVENANTS: updates, improvments or modifications of the CP.
 - Older contracts are before 2023.
 
-Precedence:
+* Precedence:
 - If CP specifies a value, CP overrides CG.
 - If CP is silent, fall back to CG.
 - If all are silent/ambiguous, set null.
@@ -98,7 +98,7 @@ Precedence:
 - Treat each product present in the AVENANT section as separate products, even if they repeat with respect to the CP. 
 Consider the information of each avenant to define the financial conditions therein.
 
-Main Objectives:
+* Main Objectives:
 - Your main objective is to identify the products present in the contract and recuperate the items defined in the Scope to extract.
 - Products & rows: Create one row per product as found in the CP (tables, bullets, or callouts) or AVENANTS.
 Include items marked Inclus/Gratuit/Compris/0 with is_included=true and price_unitaire=null (or 0 only if literally “0”).
@@ -113,12 +113,12 @@ of the contract product changes in time.
 Note that the presence of avenants may imply having several rows for a single product type. Avenant history must be saved in the form of the product rows.
 Order the rows chronologically using the signature date: first the products as defined in the CP and then the products as defined in the avenant.
 
-Contract structre:
+* Contract structre:
 - In newer contracts products are usually found in “Abonnement …” and “Services associés/Options”.
 - In older contracts  products are usually found in "Prix, modalites de facturation et de reglement".
 - In avenants products are usually found under "2 ARTICLE 5.2 - ABONNEMENT" or "Modifications de l'article 5.2 des Conditions Particulières du Contrat".
 
-How to identify products & prices:
+* How to identify products & prices:
 - One row = one priced block. Create a product row whenever a description/label is directly tied to a price in the same line/cell/box or the
  immediately following short line.
 - Valid blocks can be: table rows, bullet/paragraph lines with a nearby price, or bordered callouts.
@@ -144,7 +144,7 @@ this IS the price of that product line. Only skip the final line like “Total a
 - If a cell contains several amounts (e.g., “1 550 € HT 200 € HT 150 € HT”), map each amount to the closest preceding labeled item in that block
  (e.g., WMS → 1 550, KPI → 200, Cloisonnement → 150) and emit one row per amount.
 
-How to identify overconsumption (surconsommation)
+* How to identify overconsumption (surconsommation)
 - How to indentify: if the nearby text mentions any of: dépassement, complément de consommation, surconsommation, 
 au-delà de l'engagement, utilisateur supplémentaire / seat additionnel, palier, unité d'œuvre, S1/S2, dégressif.
 - If the rule has no numeric price (e.g., “unité d'œuvre surcotée de 15% vs palier”):
@@ -158,7 +158,9 @@ au-delà de l'engagement, utilisateur supplémentaire / seat additionnel, palier
     - usage_term_mode if the block states it; else null
     - usage_notes = short label, e.g. "prix par utilisateur supplémentaire".
 
-How to handle avenants:
+* How to handle avenants:
+- Avenants are found after the CP. Each one is defined with the tags: start of the avenant "=== DOC: AVENANT/START ===" and
+end of the avenant "=== DOC: AVENANT/END ===". Each of these must be treated independently.
 - Each avenant creates additional product rows in sequential order, as defined by the signature date of the avenant;
 do not overwrite CP rows, even if the product is the same. Do not omit unchanged prodcuts already present in the CP.
 - If an avenant changes an already present product in any way, reflect the change in evidence_avenant following evidence guidelines.
@@ -171,31 +173,27 @@ by the CP or the previous avenant. Consider the signature date to define the lat
 - If a right column contains multiple euro amounts, pair them to the nearest preceding labeled anchors in the left column
  (e.g., WMS → 1 550; KPI → 200; Cloisonnement → 150). Emit one row per pair.
 
- How to handle Volume products (table decomposition):
+* How to handle Volume products (table decomposition):
 - If the CP shows a “Pricing mensuel volumes” table with Year and S1/S2 columns,
     - EMIT ONE ROW PER PRICED SEMESTER CELL (e.g., 2015 S1, 2015 S2, 2016 S1, 2016 S2…).
     - product_name: "Abonnement volume <Famille> — <Année> <S1/S2>".
-    - price_unitaire = that semester’s amount; loyer = that same amount.
+    - price_unitaire = that semester's amount; loyer = that same amount.
     - loyer_periodicity = Mensuelle; tax_basis from the same cell if present.
-    - is_volume_product = true (because it’s usage-based), BUT you must still fill loyer
+    - is_volume_product = true (because it's usage-based), BUT you must still fill loyer
     - since the table states an explicit monthly price for that commitment period.
     - Do NOT aggregate these; do NOT replace them with one generic “volume” row.
 
-Edge cases to consider:
+* Edge cases to consider:
 - If reconduction_tacite=True, ignore duration/prorata and set date_end_of_contract="2099-12-31". 
 - In evidence_date_end_of_contract, cite the reconduction clause.
 - If the "Niveau de Service (SLA)" is present, add it as an additional product including the code. Most details about this product will remain empty.
 - Specially in AVENANT parts of the contract, The phrase “d'un montant forfaitaire mensuel total de : X €” is not a recap when tied to a family/process;
  it's the price of that product line. Only the terminal line “Total abonnement…” is the recap to skip.
 
-Sanity checks:
-- For each AVENANT pricing table, count numeric amounts excluding the very last “Total abonnement …”. You must output at least that many product
- rows from the AVENANT.
-
-Columns to emit (tool output schema).
-Emit one JSON object per product row that maps 1:1 to the record_products tool parameters below.
-Do not invent fields or keys. For each key, follow the definition exactly; if a value is not explicit on the relevant block, set null. 
-Duplicate affair-level fields on every row, many comming from the GC.
+* Columns to emit (tool output schema).
+- Emit one JSON object per product row that maps 1:1 to the record_products tool parameters below.
+- Do not invent fields or keys. For each key, follow the definition exactly; if a value is not explicit on the relevant block, set null. 
+- Duplicate affair-level fields on every row, many comming from the GC.
 
 * Contract / affair (repeat on every product row)
 - company_name (string) — Client legal name from CP “Raison sociale du Client”. If absent, fall back to CG; else null.
@@ -330,12 +328,18 @@ each CP or each AVENANT). This is an agregated calculation.
 are in the future with respect to the CP or CG. In general prices present in the avenant are higher than the original ones found in the contract.
 Attribute a low confidence value if these conditions are not satisfied.
 
-
 Output:
 - When filling tool arguments, do not include raw newlines inside strings; replace internal newlines with spaces or “\n”.
 - Return an array of product rows via the tool. Each row duplicates the shared affair-level fields (company, dates, currency, etc.) for that product.
 - Emit all fields. For every product, include every property defined in the tool schema. If unknown, set null. Do not omit keys.
 """
+
+"""
+Sanity checks:
+- For each AVENANT pricing table, count numeric amounts excluding the very last “Total abonnement …”. You must output at least that many product
+ rows from the AVENANT.
+ 
+ """
 
 financial_tools = [{
     "type": "function",

@@ -113,7 +113,9 @@ blocks = blocks[:4]
 content_avenant_str = "\n\n".join(blocks)
 
 #content_sous_str = content_sous[0]
-print(len(content_cadre_str), len(content_sous_str), len(content_avenant_str))
+print("len content [cg,cp,av]=",len(content_cadre_str), len(content_sous_str), len(content_avenant_str))
+#content_cadre_str=''
+#content_sous_str=''
 content = (
     "=== DOC: CADRE — type=cadre ===\n"
     + content_cadre_str.strip() + "\n\n"
@@ -122,7 +124,30 @@ content = (
     + "=== DOC: AVENANT — type=avenant ===\n"
     + content_avenant_str
 )
+
+
+user_question = """
+Scope to parse (in order):
+1) The CP block.
+2) For EVERY AVENANT block bounded by:
+   === DOC: AVENANT/START === ... === DOC: AVENANT/END ===
+   - Treat each priced sub-line as a separate product row.
+   - Repeat CP products if the AV presents them (even unchanged).
+   - Ignore recap lines (“Total abonnement …”).
+   - Set the same signature_date_av and avenant_number on ALL rows from that AV.
+   - If the AV shows a monthly total, set total_abbonement_mensuel on ALL recurring rows from that AV.
+
+Sanity check per AV:
+- Use amounts_hint=[…] (if present) as a count check: count numeric amounts in the AV (excluding the final total). You MUST output at least that many rows for that AV.
+- If fewer rows are found, add the missing rows and re-check before returning.
+
+Chronology:
+- Output CP rows first, then AV rows ordered by signature_date_av.
+
+Do not summarize or merge products. One priced block = one row.
+"""
 user_question = "Extract the products found in the contract with their financial conditions using the rules and return products via the tool."
+user_question = "Extract all the products found in each avenant sections with their financial conditions using the rules and return products via the tool. Treat each avenant independently and repeat products if found multiple times"
 messages = [
     {"role": "system", "content": financial_prompt},
     {"role": "user", "content": f"DOCUMENT CONTENT:\n\n{content}\n\nTASK:\n{user_question}"}
@@ -149,7 +174,7 @@ OUTPUT_EUR_PER_1M = 6.91
 
 cost_eur = (pt/1_000_000)*INPUT_EUR_PER_1M + (ct/1_000_000)*OUTPUT_EUR_PER_1M
 print(f"Cost per doc: €{cost_eur:.2f}") 
-print(f"Cost all: €{10000*cost_eur:.2f}")
+print(f"Cost all: €{2000*cost_eur:.2f}")
 
 tool_call = resp.choices[0].message.tool_calls[0]
 
@@ -191,7 +216,7 @@ validate_columns(df, col_order)
 
 df=df.fillna("null")
 print("output shape = ",df.shape)
-df[col_order].to_markdown("product_pppp.md", index=False)
+df[col_order].to_markdown("product_mq1.md", index=False)
 
 
 
