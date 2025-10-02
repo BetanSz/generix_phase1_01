@@ -82,7 +82,6 @@ with: line_index (0-based), annex_line, and context (≈5 lines around the headi
 If no safe annex is found, DO NOT call the tool; answer: "no_annex_found".
 """
 
-
 financial_prompt = """
 You extract ONLY the financial and billing information from the provided CONTEXT. CONTEXT will include three document types, which compose a single contract:
 - One CG = Conditions Générales (cadre): general default contract conditions.
@@ -206,7 +205,8 @@ This information is by default in the GC, and sometimes it's changed in the CP. 
 - signature_date_cp (date|null) — Signature date of CP, if present. If an AVENANT date is present instead, put this to null.
 - signature_date_av (date|null) — Signature date of AVENANT, if present.
 - avenant_number (numeric|null) - If this part of the document is an AVENANT, put the number in this field.
-- service_start_date (string date|null) — Start date of services if a concrete date is written. Do not invent.
+- service_start_date (string date|null) — Start date of services if a concrete date is written. Do not invent. For example it maay be "prend effet à la date de signature.",
+So the start date should be the signature of the document. This is usually the case for AVENANTS.
 - debut_facturation (string|null) — Write a specific billing start date if available. If the start is an event (e.g.,procede verbal: PV VABF, GO), put that instead.
 In a given contract, different products may have different billing start dates.
 - duree_de_service (number or string|null) — Numeric duration in months or "indeterminé". If possible read the CP “Durée des Services …” line, if absent in CP, fallback to CG.
@@ -334,11 +334,12 @@ Output:
 - Emit all fields. For every product, include every property defined in the tool schema. If unknown, set null. Do not omit keys.
 """
 
+#TODO: include this? what are their effect exactly
 """
 Sanity checks:
 - For each AVENANT pricing table, count numeric amounts excluding the very last “Total abonnement …”. You must output at least that many product
  rows from the AVENANT.
- 
+ - Minimum rows sanity check. If the CP shows ≥2 priced blocks, you must output ≥2 rows (still ignore totals).
  """
 
 financial_tools = [{
@@ -480,3 +481,17 @@ tools_annex = [
         }
     }
 ]
+
+col_order  = ['company_name', "numero_de_contrat" ,'signature_date_cg', 'signature_date_cp','signature_date_av','avenant_number', 'product_code', 'product_name',
+              'duree_de_service',  'duree_de_service_notes', "date_end_of_contract" ,'reconduction_tacite','term_mode', 'billing_frequency', "bon_de_command" ,'payment_methods', 'payment_terms', "debut_facturation",
+ 'price_unitaire',"quantity","is_volume_product","loyer","loyer_facturation","loyer_annuele",'devise_de_facturation', 'loyer_periodicity', "total_abbonement_mensuel" ,'one_shot_service', 'tax_basis','is_included',
+ 'usage_overconsumption_price', 'usage_overconsumption_periodicity', 'usage_term_mode', 'overconsumption_term_mode', "usage_notes",
+ 'service_start_date', 'billing_modality_notes',
+ 'reval_method', 'reval_rate_per', 'reval_formula', 'reval_compute_when', 'reval_apply_when', "reval_apply_from",
+       'reval_source',  
+       'evidence_product', 'evidence_price', 'evidence_payment_methods','total_abbonement_mensuel_evidence', 'evidence_date_end_of_contract', "evidence_avenant",
+       'evidence_usage', 'evidence_revalorization', 'evidence_billing',
+       'evidence_dates', 'confidence_price',
+       'confidence_usage', 'confidence_revalorization', 'confidence_billing',
+       'confidence_dates', 'confidence_company', 'confidence_avenant'
+       ]

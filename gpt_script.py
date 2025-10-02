@@ -44,208 +44,131 @@ for doc in docs:
 content_cadre = [doc.get("content", "") for doc in docs if "CADRE".lower() in doc["id"].lower() or "CG".lower() in doc["id"].lower()]
 content_sous = [doc.get("content", "") for doc in docs if "SOUSCRIPTION".lower() in doc["id"].lower() or "CP".lower() in doc["id"].lower()]
 content_avenant = [doc.get("content", "") for doc in docs if "AVENANT-".lower() in doc["id"].lower()]
-[doc.get("id", "") for doc in docs if "AVENANT-".lower() in doc["id"].lower()][:4]
+
+# TODO: this ordering options, without llms seems fine actually.
+pdf_names = [doc.get("id", "") for doc in docs if "AVENANT-".lower() in doc["id"].lower()]
+order_pdf = [parse_date_from_filename(name) for name in pdf_names]
+order_content = [parse_date_from_text_fr(content) for content in content_avenant]
+order_both = list(zip(order_pdf, order_content, pdf_names))
+order_both
+
 print(len(content_cadre), len(content_sous), len(content_avenant))
 assert len(content_cadre)>=1 and len(content_sous)>=1
-
-def gpt_truncation(content_sous_str, tools_annex, annex_prompt, do_truncation):
-    """
-    this hard trucncation impact culture semester declinantion.
-    TODO: remove some sections only and summerize the rest
-    """
-    if not do_truncation:
-        return content_sous_str
-    content = (content_sous_str.strip())
-    user_question = "Provie the Annex or Appendix using the rules"
-    messages = [
-        {"role": "system", "content": annex_prompt},
-        {"role": "user", "content": f"DOCUMENT CONTENT:\n\n{content}\n\nTASK:\n{user_question}"}
-    ]
-    resp = client_oai.chat.completions.create(
-        model="gpt-4.1",               # your deployment name from the portal
-        messages=messages,
-        tools=tools_annex,
-        tool_choice="auto",
-        temperature=0.05, #0
-        max_tokens=5000,
-    )
-    tc = resp.choices[0].message.tool_calls[0]
-    args = json.loads(tc.function.arguments)
-
-    annex_line_idx = args["line_index"]
-    annex_heading   = args["annex_line"]
-    annex_context   = args["context"]
-    print("Annex truncation found:")
-    print(annex_heading, annex_line_idx)
-
-    # Truncate the CP right before the annex:
-    lines = content.splitlines()
-    truncated = "\n".join(lines[:annex_line_idx])
-    print("before/after truncation", len(content_sous_str), len(truncated))
-    return truncated
 
 def process_docs(content_cadre, content_sous,  tools_annex, annex_prompt, do_truncation):
     if len(content_cadre)==1 and len(content_sous)==1:
         content_cadre_str = content_cadre[0]
-        content_sous_str  = gpt_truncation(content_sous[0],  tools_annex, annex_prompt, do_truncation)
+        content_sous_str  = gpt_truncation(content_sous[0],  tools_annex, annex_prompt, do_truncation, client_oai)
         return content_cadre_str, content_sous_str
     elif len(content_cadre)==1 and len(content_sous)>=1:
         content_cadre_str = content_cadre[0]
-        content_sous_str  = "\n".join(gpt_truncation(t,  tools_annex, annex_prompt, do_truncation) for t in content_sous)
+        content_sous_str  = "\n".join(gpt_truncation(t,  tools_annex, annex_prompt, do_truncation, client_oai) for t in content_sous)
         return content_cadre_str, content_sous_str
     else:
         raise ValueError("Unexpected lengths.")
 
 do_truncation=False
 content_cadre_str, content_sous_str = process_docs(content_cadre, content_sous,  tools_annex, annex_prompt, do_truncation)
+print("len content [cg,cp,av]=",len(content_cadre_str), len(content_sous_str))
 
-start_tag = "=== DOC: AVENANT/START ==="
-end_tag   = "=== DOC: AVENANT/END ==="
-
-blocks = [
-    f"{start_tag} label=pdf{i+1}\n{avenant.strip()}\n{end_tag}"
-    for i, avenant in enumerate(content_avenant)
-]
-
-#embed()
-blocks = blocks[:4]
-#blocks = []
-content_avenant_str = "\n\n".join(blocks)
-
-#content_sous_str = content_sous[0]
-print("len content [cg,cp,av]=",len(content_cadre_str), len(content_sous_str), len(content_avenant_str))
-#content_cadre_str=''
-#content_sous_str=''
-content = (
+content_cpcg = (
     "=== DOC: CADRE — type=cadre ===\n"
     + content_cadre_str.strip() + "\n\n"
     + "=== DOC: SOUSCRIPTION — type=souscription ===\n"
     + content_sous_str.strip()
-    + "=== DOC: AVENANT — type=avenant ===\n"
-    + content_avenant_str
 )
 
-
-user_question = """
-Scope to parse (in order):
-1) The CP block.
-2) For EVERY AVENANT block bounded by:
-   === DOC: AVENANT/START === ... === DOC: AVENANT/END ===
-   - Treat each priced sub-line as a separate product row.
-   - Repeat CP products if the AV presents them (even unchanged).
-   - Ignore recap lines (“Total abonnement …”).
-   - Set the same signature_date_av and avenant_number on ALL rows from that AV.
-   - If the AV shows a monthly total, set total_abbonement_mensuel on ALL recurring rows from that AV.
-
-Sanity check per AV:
-- Use amounts_hint=[…] (if present) as a count check: count numeric amounts in the AV (excluding the final total). You MUST output at least that many rows for that AV.
-- If fewer rows are found, add the missing rows and re-check before returning.
-
-Chronology:
-- Output CP rows first, then AV rows ordered by signature_date_av.
-
-Do not summarize or merge products. One priced block = one row.
-"""
 user_question = "Extract the products found in the contract with their financial conditions using the rules and return products via the tool."
-user_question = "Extract all the products found in each avenant sections with their financial conditions using the rules and return products via the tool. Treat each avenant independently and repeat products if found multiple times"
-messages = [
+messages_cpcg = [
     {"role": "system", "content": financial_prompt},
-    {"role": "user", "content": f"DOCUMENT CONTENT:\n\n{content}\n\nTASK:\n{user_question}"}
+    {"role": "user", "content": f"DOCUMENT CONTENT:\n\n{content_cpcg}\n\nTASK:\n{user_question}"}
 ]
 
 embed()
 sys.exit()
+anticache_version = "dual_07_2review"
 resp = client_oai.chat.completions.create(
     model="gpt-4.1",               # your deployment name from the portal
-    messages=messages,
+    messages=messages_cpcg,
     tools=financial_tools,
     tool_choice="auto",
     temperature=0.05, #0
     max_tokens=25000,
 )
-
-pt = resp.usage.prompt_tokens
-ct = resp.usage.completion_tokens
-tt = resp.usage.total_tokens
-print(f"prompt: {pt}, completion: {ct}, total: {tt}")
-
-INPUT_EUR_PER_1M  = 1.73
-OUTPUT_EUR_PER_1M = 6.91
-
-cost_eur = (pt/1_000_000)*INPUT_EUR_PER_1M + (ct/1_000_000)*OUTPUT_EUR_PER_1M
-print(f"Cost per doc: €{cost_eur:.2f}") 
-print(f"Cost all: €{2000*cost_eur:.2f}")
-
+print_resp_properties(resp)
 tool_call = resp.choices[0].message.tool_calls[0]
-
-print("This should be tool_calls (if length then truncated output) =",getattr(resp.choices[0], "finish_reason", None))
-
-args_str = tool_call.function.arguments  # from the SDK
-print("len:", len(args_str))
-print("tail:", args_str[-120:])   # last 120 chars
-print("last char:", args_str[-1])
+args_str = tool_call.function.arguments
 data = json.loads(args_str)
-#print(json.dumps(data, indent=2, ensure_ascii=False))
+df_cpcg = pd.json_normalize(data["products"])
+validate_columns(df_cpcg, col_order)
 
-df = pd.json_normalize(data["products"])
-#print(df.to_markdown(index=False))
+df_cpcg=df_cpcg.fillna("null")
+print("output shape = ",df_cpcg.shape)
+df_cpcg[col_order].to_markdown(f"product_cpcg_{anticache_version}.md", index=False)
 
-col_order  = ['company_name', "numero_de_contrat" ,'signature_date_cg', 'signature_date_cp','signature_date_av','avenant_number', 'product_code', 'product_name',
-              'duree_de_service',  'duree_de_service_notes', "date_end_of_contract" ,'reconduction_tacite','term_mode', 'billing_frequency', "bon_de_command" ,'payment_methods', 'payment_terms', "debut_facturation",
- 'price_unitaire',"quantity","is_volume_product","loyer","loyer_facturation","loyer_annuele",'devise_de_facturation', 'loyer_periodicity', "total_abbonement_mensuel" ,'one_shot_service', 'tax_basis','is_included',
- 'usage_overconsumption_price', 'usage_overconsumption_periodicity', 'usage_term_mode', 'overconsumption_term_mode', "usage_notes",
- 'service_start_date', 'billing_modality_notes',
- 'reval_method', 'reval_rate_per', 'reval_formula', 'reval_compute_when', 'reval_apply_when', "reval_apply_from",
-       'reval_source',  
-       'evidence_product', 'evidence_price', 'evidence_payment_methods','total_abbonement_mensuel_evidence', 'evidence_date_end_of_contract', "evidence_avenant",
-       'evidence_usage', 'evidence_revalorization', 'evidence_billing',
-       'evidence_dates', 'confidence_price',
-       'confidence_usage', 'confidence_revalorization', 'confidence_billing',
-       'confidence_dates', 'confidence_company', 'confidence_avenant'
-       ]
+user_question = ("Extract all the products found in each avenant sections with their financial conditions using the rules and return products via the tool."
++ "Treat each avenant independently and repeat products if found multiple times")
+df_av_list = []
+#TODO: generate a contract state, handled by an agent with a different system promp as to update it while you read the avenants.
+# howoever in order to do this in a simple way, you need to have them ordered by time.
+#obs: the regex from the pdf name works well and you can always do a pass to get the date using another agent.
+for i, avenant_str in enumerate(content_avenant, start=1):
+    print(f"processing {i}/{len(content_avenant)}")
+    content_av = ("=== DOC: AVENANT — type=avenant ===\n" + avenant_str)
+    messages_av = [
+        {"role": "system", "content": financial_prompt},
+        {"role": "user", "content": f"DOCUMENT CONTENT:\n\n{content_av}\n\nTASK:\n{user_question}"}
+    ]
+    print("content [CPCG, AV]=", len(content_cpcg), len(content_av))
+    resp = client_oai.chat.completions.create(
+        model="gpt-4.1",               # your deployment name from the portal
+        messages=messages_av,
+        tools=financial_tools,
+        tool_choice="auto",
+        temperature=0.05, #0
+        max_tokens=25000,
+    )
+    print_resp_properties(resp)
+    tool_call = resp.choices[0].message.tool_calls[0]
+    args_str = tool_call.function.arguments
+    data = json.loads(args_str)
+    df_av = pd.json_normalize(data["products"])
+    validate_columns(df_av, col_order)
+    df_av=df_av.fillna("null")
+    print("output shape = ",df_av.shape)
+    df_av_list.append(df_av)
 
-def validate_columns(df, col_order):
-    missing = [c for c in df.columns if c not in col_order]
-    extra   = [c for c in col_order if c not in df.columns]
-    print(len(df.columns), len(col_order))
-    if missing or extra:
-        print("Missing-from-col_order:", missing)
-        print("Missing-from-df (extra in col_order):", extra)
-        raise ValueError("Column mismatch between df and col_order")
-validate_columns(df, col_order)
+df_av_all = pd.concat(df_av_list)
+df_av_all = df_av_all.sort_values("avenant_number")
+print("AV number [len(pdfs), unique number in df]",len(content_avenant), df_av_all["avenant_number"].nunique())
+df_av_all[col_order].to_markdown(f"product_av_{anticache_version}.md", index=False)
 
-df=df.fillna("null")
-print("output shape = ",df.shape)
-df[col_order].to_markdown("product_mq1.md", index=False)
-
-
-
-
-
+df_cpcgav_all = pd.concat([df_cpcg, df_av_all])
+df_cpcgav_all[["signature_date_cp","signature_date_av"]] = (
+    df_cpcgav_all[["signature_date_cp","signature_date_av"]]
+    .replace("null", pd.NA)
+)
+df_cpcgav_all["signature_date_any"] = (
+    df_cpcgav_all["signature_date_av"].combine_first(df_cpcgav_all["signature_date_cp"])
+)
+df_cpcgav_all["signature_date_any"] = pd.to_datetime(df_cpcgav_all["signature_date_any"], errors="coerce")
+df_cpcgav_all = df_cpcgav_all.sort_values("signature_date_any")
+df_cpcgav_all.to_markdown(f"product_cpcgav_{anticache_version}.md", index=False)
 
 
-
-
-
-
-
-df.to_markdown("product_raw.md", index=False)
-df[col_order].to_excel(f"{company_name}.xlsx", index=False)
-
-
-df2json = df.replace({np.nan: None})
-rows = json.loads(df2json.to_json(orient="records"))
-index_candidates = set([build_response_id(pdf).lower() for pdf in doc_ids])
-if len(index_candidates)==1:
-    id = index_candidates.pop()
-else:
-    print("elegent id generation failed")
-    id = index_candidates.pop()
-print("id of contract:", id)
-#embed()
-
-batch = {
-    "id": id,
-    "rows": rows
-}
-cosmos_table.upsert_item(batch)
+#df2json = df.replace({np.nan: None})
+#rows = json.loads(df2json.to_json(orient="records"))
+#index_candidates = set([build_response_id(pdf).lower() for pdf in doc_ids])
+#if len(index_candidates)==1:
+#    id = index_candidates.pop()
+#else:
+#    print("elegent id generation failed")
+#    id = index_candidates.pop()
+#print("id of contract:", id)
+##embed()
+#
+#batch = {
+#    "id": id,
+#    "rows": rows
+#}
+#cosmos_table.upsert_item(batch)
