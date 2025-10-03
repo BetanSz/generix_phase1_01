@@ -8,7 +8,8 @@ import json
 import sys
 
 from clients import cosmos_digitaliezd, client_oai, cosmos_table
-from gpt_prompt import *
+from gpt_module_financial_agent import *
+from gpt_module_delta_agent import *
 from gpt_module import *
 import json, ast, re
 import pandas as pd
