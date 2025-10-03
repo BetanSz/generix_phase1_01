@@ -8,6 +8,7 @@ import json
 from datetime import datetime
 from unidecode import unidecode
 from datetime import date
+import pandas as pd
 
 
 def truncate_after_flag(text, annex_flag, signature_flag_list):
@@ -87,14 +88,14 @@ def print_resp_properties(resp):
     tool_call = resp.choices[0].message.tool_calls[0]
     print("This should be tool_calls (if length then truncated output) =",getattr(resp.choices[0], "finish_reason", None))
     args_str = tool_call.function.arguments  # from the SDK
-    print("len:", len(args_str))
-    print("tail:", args_str[-120:])   # last 120 chars
-    print("last char:", args_str[-1])
+    #print("len:", len(args_str))
+    #print("tail:", args_str[-120:])
+    #print("last char:", args_str[-1])
 
 def validate_columns(df, col_order):
     missing = [c for c in df.columns if c not in col_order]
     extra   = [c for c in col_order if c not in df.columns]
-    print(len(df.columns), len(col_order))
+    print("df.cols == col_order: ",len(df.columns) == len(col_order))
     if missing or extra:
         print("Missing-from-col_order:", missing)
         print("Missing-from-df (extra in col_order):", extra)
@@ -161,3 +162,34 @@ def parse_date_from_filename(name):
         y, mth = int(m.group(1)), int(m.group(2))
         return datetime(y, mth, 1).date()
     return None
+
+def get_response_df(client_oai, message, tools,):
+    resp = client_oai.chat.completions.create(
+        model="gpt-4.1",               # your deployment name from the portal
+        messages=message,
+        tools=tools,
+        tool_choice="auto",
+        temperature=0.05, #0
+        max_tokens=25000,
+    )
+    print_resp_properties(resp)
+    tool_call = resp.choices[0].message.tool_calls[0]
+    args_str = tool_call.function.arguments
+    data = json.loads(args_str)
+    df = pd.json_normalize(data["products"])
+    return df
+
+def get_df_cpcgav_all(df_cpcg, df_av_all):
+    df_cpcgav_all = pd.concat([df_cpcg, df_av_all])
+    df_cpcgav_all[["signature_date_cp","signature_date_av"]] = (
+        df_cpcgav_all[["signature_date_cp","signature_date_av"]]
+        .replace("null", pd.NA)
+    )
+    df_cpcgav_all["signature_date_any"] = (
+        df_cpcgav_all["signature_date_av"].combine_first(df_cpcgav_all["signature_date_cp"])
+    )
+    df_cpcgav_all["signature_date_any"] = pd.to_datetime(df_cpcgav_all["signature_date_any"], errors="coerce")
+    df_cpcgav_all = df_cpcgav_all.sort_values("signature_date_any")
+    df_cpcgav_all = df_cpcgav_all.drop(columns=["signature_date_any"])
+    df_cpcgav_all = df_cpcgav_all.reset_index(drop=True)
+    return df_cpcgav_all
