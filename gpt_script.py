@@ -9,7 +9,7 @@ import sys
 
 from clients import cosmos_digitaliezd, client_oai, cosmos_table
 from gpt_module_financial_agent import *
-from gpt_module_delta_agent import *
+#from gpt_module_delta_agent import *
 from gpt_module import *
 import json, ast, re
 import pandas as pd
@@ -119,8 +119,7 @@ messages_cpcg = [
 
 embed()
 sys.exit()
-
-anticache_version = "dual_2review_V4"
+anticache_version = "dual_delta_agent_01"
 df_cpcg = get_response_df(client_oai, messages_cpcg, financial_tools)
 
 validate_columns(df_cpcg, col_order)
@@ -134,9 +133,17 @@ df_av_list = []
 #TODO: generate a contract state, handled by an agent with a different system promp as to update it while you read the avenants.
 # howoever in order to do this in a simple way, you need to have them ordered by time.
 #obs: the regex from the pdf name works well and you can always do a pass to get the date using another agent.
-for i, avenant_str in enumerate(content_avenant, start=1):
+
+for i, avenant_str in enumerate(content_avenant[:1], start=1):
     print(f"*****************  processing {i}/{len(content_avenant)} *****************")
     content_av = ("=== DOC: AVENANT — type=avenant ===\n" + avenant_str)
+    #if df_av_list:
+    #    prior_state = pd.concat([df_cpcg] + df_av_list)
+    #else:
+    #    prior_state = df_cpcg
+    #prior_state = prior_state.to_json(orient="records", force_ascii=False)
+    #delta = get_avenant_delta(client_oai, delta_tool, delta_prompt, prior_state, avenant_str)
+    #print(json.dumps(delta, ensure_ascii=False, indent=2))
     messages_av = [
         {"role": "system", "content": financial_prompt},
         {"role": "user", "content": f"DOCUMENT CONTENT:\n\n{content_av}\n\nTASK:\n{user_question}"}
@@ -147,6 +154,8 @@ for i, avenant_str in enumerate(content_avenant, start=1):
     df_av=df_av.fillna("null")
     print("output shape = ",df_av.shape)
     df_av_list.append(df_av)
+
+
 df_av_all = pd.concat(df_av_list)
 validate_columns(df_av_all, col_order)
 df_av_all = df_av_all[col_order].sort_values("avenant_number")
