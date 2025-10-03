@@ -14,15 +14,29 @@ import json, ast, re
 import pandas as pd
 import numpy as np
 
-def get_cpcgav(docs, verbose=True, safe=True):
+def get_cpcgav(docs, verbose=True, safe=True, avenant_ordering=True):
     #TODO: This is getting very fragile...
+    # TODO: this ordering options, without llms seems fine actually.
     content_cadre = [doc.get("content", "") for doc in docs if "CADRE".lower() in doc["id"].lower() or "CG".lower() in doc["id"].lower()]
     content_sous = [doc.get("content", "") for doc in docs if "SOUSCRIPTION".lower() in doc["id"].lower() or "CP".lower() in doc["id"].lower()]
-    content_avenant = [doc.get("content", "") for doc in docs if "AVENANT-".lower() in doc["id"].lower()]
-    if verbose:
-        print("Amount documents [CG,CP,AV]=",len(content_cadre), len(content_sous), len(content_avenant))
     if safe:
         assert len(content_cadre)>=1 and len(content_sous)>=1
+    if avenant_ordering:
+        avenant_id_content_list = [(doc.get("id", ""), doc.get("content", "")) for doc in docs if "AVENANT-".lower() in doc["id"].lower()]
+        # OBS: tuple structre (id, content, on=irdering on file name, oc=ordering of file content)
+        avenant_id_content_index_list = [(id, content, parse_date_from_filename(id), parse_date_from_text_fr(content)) for id,content in avenant_id_content_list]
+        sorting_key = 2 # parse_date_from_filename(id) -> from filname
+        sorting_key = 3 # parse_date_from_text_fr(content) -> from content
+        avenant_id_content_index_list = sorted(avenant_id_content_index_list, key=lambda x: x[sorting_key])
+        if verbose:
+            print("Avenant ordering:")
+            for id,_,on,oc in avenant_id_content_index_list:
+                print(on,oc)
+        content_avenant = [content for _,content,_,_ in avenant_id_content_index_list]
+    else:
+        content_avenant = [doc.get("content", "") for doc in docs if "AVENANT-".lower() in doc["id"].lower()]
+    if verbose:
+        print("Amount documents [CG,CP,AV]=",len(content_cadre), len(content_sous), len(content_avenant))
     return content_cadre, content_sous, content_avenant
 
 def process_cgcp(content_cadre, content_sous,  tools_annex, annex_prompt, do_truncation):
@@ -67,14 +81,6 @@ def get_docs(company_name, exclude_flag=True, verbose=True):
 
 docs = get_docs(company_name)
 content_cadre, content_sous, content_avenant = get_cpcgav(docs)
-
-# TODO: this ordering options, without llms seems fine actually.
-#pdf_names = [doc.get("id", "") for doc in docs if "AVENANT-".lower() in doc["id"].lower()]
-#order_pdf = [parse_date_from_filename(name) for name in pdf_names]
-#order_content = [parse_date_from_text_fr(content) for content in content_avenant]
-#order_both = list(zip(order_pdf, order_content, pdf_names))
-#order_both
-
 do_truncation=False
 content_cadre_str, content_sous_str = process_cgcp(content_cadre, content_sous,  tools_annex, annex_prompt, do_truncation)
 print("len content [cg,cp]=",len(content_cadre_str), len(content_sous_str))

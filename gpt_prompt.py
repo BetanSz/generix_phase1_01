@@ -6,83 +6,6 @@ from pathlib import Path
 import textwrap
 import json
 
-annex_prompt = """
-Your main objective is to find the line where the Annex of the document starts.
-Annex tend to start after the signature of the contract. Examples of signatures:
-
-le : 20/03/2015
-Pour GENERIX :
-Signé par :
-Marc BOULON
-Titre :
-Directeur des Opérations
-Supply Chain
-Signature :
-Lu et approuvé
-M
-Pour CULTURA - SOCULTUR SAS :
-Signé par :
-JC Gabillard
-
-or
-
-Date:
-27/1/2017
-For and on behalf of GENERIX:
-Name and forename of authorized person:
-Renaud Vadon
-Title: VP Sales
-For and on behalf of Airbus :
-Name and forename of authorized person:
-<figure>
-Title:
-1
-@ AIRBUS
-Signature:
-</figure>
-
-Digitally signed
-by Jose Villajos
-Serrano - SIG
-Reason: I am
-the approver of
-this document
-Date: 28/11/17
-08:53:24 CET
-
-Signature:
-generix
-group
-Read and Approved
-
-(Signature and stamp preceded by the handwritten entry "Read and Approved")
-2 rue des Peupliers - BP 20158
-59810 LESQUIN
-Tél. : +33 (0)1 77 45 41 80
-Fax : +33 (0)3 20 41 48 07
-Slie : www.generixgroup.com
-SIREN : 3// 619 150 - IVA · IR 88 37/ 619 150
-
-As you can see it tends to have a date and a recall of the signing parties.
-Then the annex starts. Typicaal Appendix or Annex title look like this:
-
-# Appendix 1: Description of the GCI Invoice Manager On Demand service
-# Annexe 1: Description du service GCS On Demand
-<caption>Annexe 1: Niveaux de Services (SLA), pack fonctionnalités et options Les Niveaux de Services (SLA) proposés</caption>
-# ANNEXE 2 : DESCRIPTION DU SERVICE GENERIX COLLABORATIVE REPLENISHMENT (GCR)
-
-So in order to identify the Annex you need to:
-1) Find the signature region, usually after product description and payment details.
-2) After the signature region identify where the Annex start.
-3) Provide in json the line where the annex start, the actual annex line and the context of that lines.
-4) the context of that line is 5 lines upper and lower than the annex line.
-
-If you can identify a single best annex heading, you MUST call tool report_annex_anchor
-with: line_index (0-based), annex_line, and context (≈5 lines around the heading).
-If no safe annex is found, DO NOT call the tool; answer: "no_annex_found".
-"""
-
-
 
 financial_prompt = """
 ### Main Objectives:
@@ -455,38 +378,6 @@ financial_tools = [{
         }
     }
 }]
-
-tools_annex = [
-    {
-        "type": "function",
-        "function": {
-            "name": "report_annex_anchor",
-            "description": (
-                "Return where the Annex/Appendix starts. "
-                "Use 0-based line index in the *provided DOCUMENT CONTENT*. "
-                "Context must be ~5 lines before and after the annex line."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "line_index": {
-                        "type": "integer",
-                        "description": "0-based index of the annex heading line in the input text split by \\n."
-                    },
-                    "annex_line": {
-                        "type": "string",
-                        "description": "The exact annex heading line, verbatim from the document."
-                    },
-                    "context": {
-                        "type": "string",
-                        "description": "Concise context: ~5 lines before and after the annex line, joined with \\n."
-                    }
-                },
-                "required": ["line_index", "annex_line", "context"]
-            }
-        }
-    }
-]
 
 col_order  = ['company_name', "numero_de_contrat" ,'signature_date_cg', 'signature_date_cp','signature_date_av','avenant_number', 'product_code', 'product_name',
               'service_start_date','duree_de_service',  'duree_de_service_notes', "date_end_of_contract" ,'reconduction_tacite','term_mode', 'billing_frequency', "bon_de_commande" ,'payment_methods', 'payment_terms', "debut_facturation",
