@@ -99,6 +99,8 @@ of the contract product changes in time.
 - Keep original language of quotes (FR/EN). Output currency as ISO (EUR, USD, GBP, CHF, CAD, AUD, JPY). No conversions.
 - Prefer capturing a product row even if details are missing. when unsure about a field, set that field to null (do not invent values).
 - Order the rows chronologically using the signature date: first the products as defined in the CP and then the products as defined in the avenant.
+- Use null when a field is not applicable by design for that row (e.g., loyer_periodicity for a one-shot, or loyer for a pure volume line with no flat fee).
+Use the string "unknown" when the field should exist in this contract (typical CP/AV fields) but is not explicitly stated or cannot be located with confidence.
 
 ### Document structure and precedence:
 - One CG = Conditions Générales (cadre): general default contract conditions.
@@ -113,14 +115,14 @@ of the contract product changes in time.
 - In avenants products are usually found under "2 ARTICLE 5.2 - ABONNEMENT" or "Modifications de l'article 5.2 des Conditions Particulières du Contrat".
 
 ### How to identify products & prices:
-- One row = one priced block.A "block" may be a table row, a bullet/list item, or a short paragraph (≤3 lines) where a label is clearly tied to a
+- One row = one priced block. A "block" may be a table row, a bullet/list item, or a short paragraph (≤3 lines) where a label is clearly tied to a
  nearby amount (same line or within the next line). Free-text blocks count if the pairing is clear. Create a product row whenever a description/label
    is directly tied to a price in the same line/cell/box or the immediately following short line.
 - Valid blocks can be: table rows, bullet/paragraph lines with a nearby price, or bordered callouts. Products may also appear in the contract text in
 natural language.
 - Do not make rows for “Total / Sous-total / Récapitulatif / recaps /Total abonnement /Total abonnement aux Process métier …”. Only record the underlying 
 items that carry their own price or are included. Do not aggregate across blocks: one row per priced block. If a block shows only a total,
- do not produce a row and use the child items that carry their own prices. This aggregated magnitudes can only be present in total_abonnement_mensuel.
+ do not produce a row and use the child items that carry their own prices. These aggregated magnitudes can only be present in total_abbonement_mensuel.
 - Price extraction. Take the closest amount to the block. Set tax_basis only if HT/TTC is shown next to that amount.
 - Periodicity. Set loyer_periodicity from the local wording next to the price (e.g., mensuel/le, trimestriel/le, annuel/le).
  If not explicit on that block, leave null.
@@ -158,7 +160,7 @@ end of the avenant "=== DOC: AVENANT/END ===". Each of these must be treated ind
 - Each avenant creates additional product rows in sequential order, as defined by the signature date of the avenant;
 do not overwrite CP rows, even if the product is the same. Do not omit unchanged products already present in the CP.
 - If an avenant changes an already present product in any way, reflect the change in evidence_avenant following evidence guidelines.
-- If an avenant shows a new monthly total, put it in total_abonnement_mensuel only on the avenant rows. Copy the same total_abonnement_mensuel
+- If an avenant shows a new monthly total, put it in total_abbonement_mensuel only on the avenant rows. Copy the same total_abbonement_mensuel
 to all recurring rows within that CP/AV only; do not copy across other CP/AVs.
 - Order outputs by signature date (CP rows should come first, then avenants chronologically using their signature date).
 - When an AVENANT shows products that also exist in the CP (even with the same price), repeat them as new rows for that AVENANT. Do not omit unchanged products.
@@ -177,18 +179,18 @@ to all recurring rows within that CP/AV only; do not copy across other CP/AVs.
 - If reconduction_tacite=True, ignore duration/prorata and set date_end_of_contract="2099-12-31". In evidence_date_end_of_contract, cite the reconduction clause.
 - If the "Niveau de Service (SLA)" is present, add it as an additional product including the code. Most details about this product will remain empty.
 - Specially in AVENANT parts of the contract, The phrase “d'un montant forfaitaire mensuel total de : X €” is not a recap when tied to a family/process;
- it's the price of that product line. Only the terminal line “Total abonnement…” is the recap to put in total_abonnement_mensuel.
+ it's the price of that product line. Only the terminal line “Total abonnement…” is the recap to put in total_abbonement_mensuel.
 
 ### Columns to emit (tool output schema).
 - Emit one JSON object per product row that maps 1:1 to the record_products tool parameters below.
 - Do not invent fields or keys. For each key, follow the definition exactly; if a value is not explicit on the relevant block, set null. 
-- Duplicate affair-level fields on every row, many coming from the GC.
+- Duplicate affair-level fields on every row, many coming from the CG.
 
 ### Contract / affair (repeat on every product row)
 - company_name (string) — Client legal name from CP “Raison sociale du Client”. If absent, fall back to CG; else null.
 - numero_de_contrat (number|null)- The contract number, which usually appear the the beginning of the file under CONTRAT CADRE DE REFERENCE or OPPORTUNITE.
 - reconduction_tacite (bool|null) - Find if the contract has tacite or automatic reconduction, meaning it will renew itself unless stipulated otherwise.
-This information is by default in the GC, and sometimes it's changed in the CP. Answer True or False.
+This information is by default in the CG, and sometimes it's changed in the CP. Answer True or False.
 - devise_de_facturation (enum: EUR, USD, GBP, CHF, CAD, AUD, JPY) — From CP “Devise de facturation”; fall back to CG.
 - tax_basis (HT/TTC|null) — If explicitly shown near prices/totals. Never infer.
 - signature_date_cg (date|null) — Signature date of CG, if present. If an AVENANT date is present instead, put this to null.
@@ -230,7 +232,7 @@ expressing amount of for example bills. If absent set to null.
   200 €/mois + “utilisateur supplémentaire 10 €/mois”), set is_volume_product=false and
   capture overconsumption in usage_*.
 - loyer (number|null) — Final price of the product for its own cadence (usually in the form of price_unitaire per quantity),
-  regardless of periodicity. Example: if the row states “10 000 € par an”, then loyer=10000 and loyer_periodicity=Annuelle (also set loyer_annuelle=10000).
+  regardless of periodicity. Example: if the row states “10 000 € par an”, then loyer=10000 and loyer_periodicity=Annuelle (also set loyer_annuele=10000).
   If one_shot_service=True, then set this to null, since it's a one time payment.
   When is_volume_product=true, leave this field as null (the loyer cannot be calculated without knowing the consumption).
 - loyer_facturation (number|null) — This is a calculated magnitude. Is the loyer at facturation time. For example if the loyer is mensuel and the
@@ -239,7 +241,7 @@ the loyer mensuel by dividing the presented loyer by the amount of months consid
 Also note that without loyer_periodicity it is not possible to calculate this derived magnitude, and thus leave this columns as "unknown".
 When is_volume_product=true, leave this field as null (the loyer cannot be calculated without knowing the consumption).
 If one_shot_service=True, then set this to null, since it's a one time payment.
-- loyer_annuelle (number|null) — This is a calculated magnitude. Is the loyer at the end of the year. For example if the loyer is mensuel then
+- loyer_annuele (number|null) — This is a calculated magnitude. Is the loyer at the end of the year. For example if the loyer is mensuel then
 loyer_facturation = loyer * 12. Note that if the loyer is not mensuel then it's necessary to first obtain
 the loyer mensuel by dividing the presented loyer by the amount of months considered and then apply this calculated value in the formula
 Also note that without loyer_periodicity it is not possible to calculate this derived magnitude, and thus leave this columns as "unknown".
@@ -249,7 +251,7 @@ If one_shot_service=True, then set this to null, since it's a one time payment.
 If cadence appears only in distant headers or elsewhere, leave null. Do not copy billing cadence here.
 If one_shot_service=True, then set this to null, since it's a one time payment.
 When is_volume_product=true, leave this field as null (the loyer cannot be calculated without knowing the consumption).
-- total_abonnement_mensuel (number|null): the total value of the CP or AVENANT as the sum of all products having a fixed loyer (exclude volume products and
+- total_abbonement_mensuel (number|null): the total value of the CP or AVENANT as the sum of all products having a fixed loyer (exclude volume products and
 included products which have no loyer). Only consider monthly values present in the contract. First, use the explicit monthly total if present for the CP
 or AVENANT. This is an agregated quantity that has to be propagated within all rows of the CP or each AVENANT. If absent in the document, compute it as the
 sum of all recurring product loyers normalized to monthly within that same CP or avenant, excluding included/free rows, one-shot/OTC rows, 
@@ -291,8 +293,10 @@ use the terms as found in the CP.
 ### Evidence (fields that start with evidence_*)
 - Keep every evidence_* under 80 chars after whitespace collapse. If needed, shorten
   month names (e.g., “20/03/2015, 48m + prorata [CP p8]”). Keep it as short as possible you can summarize freely all evidence columns.
+  Concise quotes taken from the same row/box that justified the value for each case.
+- Always add a quotation having the source (CP, CG, AVX), being X the avenant number, and the page like [CP, p4]. If several magnitudes involved,
+prive a reference for each.
 - If possible evidence must come from the same block.
-- Concise quotes taken from the same row/box that justified the value for each case. Put reference [CG] or [CP] from which contract was obtained and page number. Replace internal newlines with spaces.
 - evidence_price — Short quote showing “Prix unitaire” times "quantity" = “Loyer mensuel” if available for context.
 - evidence_date_end_of_contract: If reconduction_tacite=False, write the reference to the 3 dates that compose this derived quantity: 
 signature date, duree_de_service and prorate (it found). If reconduction_tacite=True, then put the reference to where this is stated.
@@ -304,7 +308,7 @@ product code, then the product description is similar), write a very short summa
 - evidence_price = closest amount + local periodicity (e.g., “1 750 € HT mensuel”).
 - evidence_payment_methods = Present the value as found in CP (if present) but also mention the one found in CG. Example "Virement [CP, p12] replacing prelevement [CG, p56]".
 - If nothing explicit in that block ⇒ null.
-- total_abonnement_mensuel_evidence: list the products included under this enveloping value. Do not use full names since it could be too long, make the
+- total_abbonement_mensuel_evidence: list the products included under this enveloping value. Do not use full names since it could be too long, make the
 list short if possible. If product codes are available use those instead of the product name. After that write the explicit formula to 
 arriving at this value. For example, if 3 products having a loyer of 1550, 200 and 150 are present, then write them as “WMS+KPI+Cloisonnement (1550+200+150=1900)”.
 Propagate this enveloping value as found in the CP or the AVENANT for all rows and product type therein (they should be the same for
@@ -390,9 +394,9 @@ financial_tools = [{
                             "is_volume_product": { "type": ["boolean","null"] },
                             "loyer": { "type": ["number","null"] },
                             "loyer_facturation": { "type": ["number","null"] },
-                            "loyer_annuelle": { "type": ["number","null"] },
+                            "loyer_annuele": { "type": ["number","null"] },
                             "loyer_periodicity": { "type": ["string","null"], "enum": ["Mensuelle","Trimestrielle","Annuelle","Autre", "unknown"] },
-                            "total_abonnement_mensuel": { "type": ["number","null"] },
+                            "total_abbonement_mensuel": { "type": ["number","null"] },
 
                             # --- One-time ---
                             "one_shot_service": { "type": ["boolean"] },
@@ -429,7 +433,7 @@ financial_tools = [{
                             "evidence_billing": { "type": ["string","null"] },
                             "evidence_dates": { "type": ["string","null"] },
                             "evidence_payment_methods": { "type": ["string","null"] },
-                            "total_abonnement_mensuel_evidence": { "type": ["string","null"] },
+                            "total_abbonement_mensuel_evidence": { "type": ["string","null"] },
                             "evidence_date_end_of_contract": { "type": ["string","null"] },
                             "evidence_avenant": { "type": ["string","null"] },
                             
@@ -486,12 +490,12 @@ tools_annex = [
 
 col_order  = ['company_name', "numero_de_contrat" ,'signature_date_cg', 'signature_date_cp','signature_date_av','avenant_number', 'product_code', 'product_name',
               'service_start_date','duree_de_service',  'duree_de_service_notes', "date_end_of_contract" ,'reconduction_tacite','term_mode', 'billing_frequency', "bon_de_commande" ,'payment_methods', 'payment_terms', "debut_facturation",
- 'price_unitaire',"quantity","is_volume_product","loyer","loyer_facturation","loyer_annuelle",'devise_de_facturation', 'loyer_periodicity', "total_abonnement_mensuel" ,'one_shot_service', 'tax_basis','is_included',
+ 'price_unitaire',"quantity","is_volume_product","loyer","loyer_facturation","loyer_annuele",'devise_de_facturation', 'loyer_periodicity', "total_abbonement_mensuel" ,'one_shot_service', 'tax_basis','is_included',
  'usage_overconsumption_price', 'usage_overconsumption_periodicity', 'usage_term_mode', 'overconsumption_term_mode', "usage_notes",
  'billing_modality_notes',
  'reval_method', 'reval_rate_per', 'reval_formula', 'reval_compute_when', 'reval_apply_when', "reval_apply_from",
        'reval_source',  
-       'evidence_product', 'evidence_price', 'evidence_payment_methods','total_abonnement_mensuel_evidence', 'evidence_date_end_of_contract', "evidence_avenant",
+       'evidence_product', 'evidence_price', 'evidence_payment_methods','total_abbonement_mensuel_evidence', 'evidence_date_end_of_contract', "evidence_avenant",
        'evidence_usage', 'evidence_revalorization', 'evidence_billing',
        'evidence_dates', 'confidence_price',
        'confidence_usage', 'confidence_revalorization', 'confidence_billing',
