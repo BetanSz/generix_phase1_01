@@ -8,7 +8,7 @@ import json
 
 
 financial_prompt = """
-### Main Objectives:
+# Main Objectives:
 - Your main objective is to identify the products present in the contract and retrieve the items defined in the Scope to extract. This is mainly financial
 information about the products, and other aspects of the contract.
 - Products & rows: Create one row per product as found in the CP (tables, bullets, or callouts) or AVENANTS.
@@ -22,10 +22,10 @@ of the contract product changes in time.
 - Keep original language of quotes (FR/EN). Output currency as ISO (EUR, USD, GBP, CHF, CAD, AUD, JPY). No conversions.
 - Prefer capturing a product row even if details are missing. when unsure about a field, set that field to null (do not invent values).
 - Order the rows chronologically using the signature date: first the products as defined in the CP and then the products as defined in the avenant.
-- Use null when a field is not applicable by design for that row (e.g., loyer_periodicity for a one-shot, or loyer for a pure volume line with no flat fee).
+- Use null when a field is not applicable by design for that row (e.g., for a one-shot).
 Use the string "unknown" when the field should exist in this contract (typical CP/AV fields) but is not explicitly stated or cannot be located with confidence.
 
-### Document structure and precedence:
+## Document structure and precedence:
 - One CG = Conditions Générales (cadre): general default contract conditions.
 - One CP = Conditions Particulières (souscription): specific client defined contract conditions.
 - Possibly many AVENANTS: updates, improvements or modifications of the CP, signed after the CP.
@@ -37,7 +37,7 @@ Use the string "unknown" when the field should exist in this contract (typical C
 - In older contracts  products are usually found in "Prix, modalites de facturation et de reglement".
 - In avenants products are usually found under "2 ARTICLE 5.2 - ABONNEMENT" or "Modifications de l'article 5.2 des Conditions Particulières du Contrat".
 
-### How to identify products & prices:
+## How to identify products & prices:
 - One row = one priced block. A "block" may be a table row, a bullet/list item, or a short paragraph (≤3 lines) where a label is clearly tied to a
  nearby amount (same line or within the next line). Free-text blocks count if the pairing is clear. Create a product row whenever a description/label
    is directly tied to a price in the same line/cell/box or the immediately following short line.
@@ -63,7 +63,7 @@ this IS the price of that product line.
 - If a cell contains several amounts (e.g., “1 550 € HT 200 € HT 150 € HT”), map each amount to the closest preceding labeled item in that block
  (e.g., WMS → 1 550, KPI → 200, Cloisonnement → 150) and emit one row per amount.
 
-### How to identify overconsumption (surconsommation)
+## How to identify overconsumption (surconsommation)
 - If the nearby text mentions any of: dépassement, complément de consommation, surconsommation, 
 au-delà de l'engagement, utilisateur supplémentaire / seat additionnel, palier, unité d'œuvre, S1/S2, dégressif.
 - If the rule has no numeric price (e.g., “unité d'œuvre surcotée de 15% vs palier”):
@@ -77,7 +77,7 @@ au-delà de l'engagement, utilisateur supplémentaire / seat additionnel, palier
     - usage_term_mode if the block states it; else null
     - usage_notes = short label, e.g. "prix par utilisateur supplémentaire".
 
-### How to handle avenants:
+## How to handle avenants:
 - Avenants are found after the CP. Each one is defined with the tags: start of the avenant "=== DOC: AVENANT/START ===" and
 end of the avenant "=== DOC: AVENANT/END ===". Each of these must be treated independently.
 - Each avenant creates additional product rows in sequential order, as defined by the signature date of the avenant;
@@ -88,30 +88,35 @@ to all recurring rows within that CP/AV only; do not copy across other CP/AVs.
 - Order outputs by signature date (CP rows should come first, then avenants chronologically using their signature date).
 - When an AVENANT shows products that also exist in the CP (even with the same price), repeat them as new rows for that AVENANT. Do not omit unchanged products.
 
-### How to handle Volume products (table decomposition):
+## How to handle Volume products (table decomposition):
 - If the CP or AVENANT shows a “Pricing mensuel volumes” table with Year and S1/S2 columns,
-    - EMIT ONE ROW PER PRICED SEMESTER CELL (e.g., 2015 S1, 2015 S2, 2016 S1, 2016 S2…).
-    - product_name: "Abonnement volume <Famille> — <Année> <S1/S2>".
-    - price_unitaire = that semester's amount; loyer = that same amount.
-    - loyer_periodicity = Mensuelle; tax_basis from the same cell if present.
-    - is_volume_product = true (because it's usage-based), BUT you must still fill loyer
-    - since the table states an explicit monthly price for that commitment period.
-    - Do NOT aggregate these; do NOT replace them with one generic “volume” row.
+- EMIT ONE ROW PER PRICED SEMESTER CELL (e.g., 2015 S1, 2015 S2, 2016 S1, 2016 S2…).
+- product_name: "Abonnement volume <Famille> — <Année> <S1/S2>".
+- quantity: the numeric commitment as stated (lines, factures, bills) which is provided with a given periodicty. For example,
+  “Nombre de lignes de préparation expédiées par an” ⇒ quantity (digits only, no spaces) and quantity_periodicity=Annuelle.
+- quantity: use the numeric commitment as printed (digits only, no spaces) and keep it as an
+  **integer**. Do **not** prorate by S1/S2 percentages (30%/70%). Set quantity_periodicity according to the information on
+  the table, for example Annuelle.
+- is_volume_product = true (because it's usage-based)
+- Loyer can for exmaple be "Pricing mensual volumes".
+- since the table states an explicit monthly price for that commitment period.
+- Do NOT aggregate these; do NOT replace them with one generic “volume” row.
 
-### Edge cases to consider:
+## Edge cases to consider:
 - If reconduction_tacite=True, ignore duration/prorata and set date_end_of_contract="2099-12-31". In evidence_date_end_of_contract, cite the reconduction clause.
 - If the "Niveau de Service (SLA)" is present, add it as an additional product including the code. Most details about this product will remain empty.
 - Specially in AVENANT parts of the contract, The phrase “d'un montant forfaitaire mensuel total de : X €” is not a recap when tied to a family/process;
  it's the price of that product line. Only the terminal line “Total abonnement…” is the recap to put in total_abbonement_mensuel.
 
-### Columns to emit (tool output schema).
+## Columns to emit (tool output schema).
 - Emit one JSON object per product row that maps 1:1 to the record_products tool parameters below.
 - Do not invent fields or keys. For each key, follow the definition exactly; if a value is not explicit on the relevant block, set null. 
 - Duplicate affair-level fields on every row, many coming from the CG.
 
-### Contract / affair (repeat on every product row)
+## Contract / affair (repeat on every product row)
 - company_name (string) — Client legal name from CP “Raison sociale du Client”. If absent, fall back to CG; else null.
-- numero_de_contrat (number|null)- The contract number, which usually appear the the beginning of the file under CONTRAT CADRE DE REFERENCE or OPPORTUNITE.
+- numero_de_contrat (string|null)- The contract string, which usually appear the the beginning of the file under CONTRAT CADRE DE REFERENCE or OPPORTUNITE.
+The contract string is usually composed of two numbers like "2014100-39808", this format must be kept.
 - reconduction_tacite (bool|null) - Find if the contract has tacite or automatic reconduction, meaning it will renew itself unless stipulated otherwise.
 This information is by default in the CG, and sometimes it's changed in the CP. Answer True or False.
 - devise_de_facturation (enum: EUR, USD, GBP, CHF, CAD, AUD, JPY) — From CP “Devise de facturation”; fall back to CG.
@@ -129,26 +134,37 @@ if absent in CP, fallback to CG. Any additional remainder such as (e.g., “+ pr
 This value is "indeterminé" if the contract is of type reconduction tacite, meaning it will automatically renew itself.
 This information is usually in the CG, old contracts tend to have reconduction tacite.
 - duree_de_service_notes (string|null) — Any non-numeric tail near duree_de_service data (e.g., "+ prorata de la période en cours").
-- date_end_of_contract (string|null) - This is a derived quantity, usually not present in the contract per se.
-If reconduction_tacite=False, then it's the signature date + duree_de_service + prorata. The signature date is a date always present in the contract. 
-duree_de_service is usually in months. prorata must be calculated as the difference in month between the signature date and the end of that year, in months.
-Therefore, to calculate date_end_of_contract sum to the signature date the months of duree_de_service and prorata (if present).
-If the contract is of duree "indetermine" (meaning that reconduction_tacite=True) then there is no end to the contract. In this case instead of 
-the calculation put the date "31 dec 2099". If reconduction_tacite=False but duree_de_service is not available set it to "unknown".
+- date_end_of_contract (string|null) - This field represent the date at which the contract ends for evry product. The possible cases are:
+    -- is null for every row that has one_shot_service=True (for example for OTC).
+    -- If reconduction_tacite=True (global contract level property), then the contract is of duree "indetermine", there is no end to the contract.
+    In this case put "31 dec 2099".
+    -- If reconduction_tacite=False then this field is a derived quantity. It's the signature date + duree_de_service + prorata. The signature date
+      is a date always present in the contract. duree_de_service is usually in months. prorata must be calculated as the difference in month between
+      the signature date and the end of that year, in months. Therefore, to calculate date_end_of_contract sum to the signature date the months of 
+      duree_de_service and prorata (if present). However, if duree_de_service is not available set it to "unknown".
 - term_mode (À échoir, Échu or null) — Billing mode for base subscription, possibly present in the “Terme” column.
 For overconsumption lines, set overconsumption_term_mode accordingly.
 
-### Product identification
+## Product identification
 - product_name (string, required) — Line label (“Libellé”) in CP pricing sections.
 - product_code (string|null) — “Code” in the same row if present. Put only the code number, any additional description belongs to product_name.
 Older contracts tend to not have the product code.
 - is_included (boolean, required) — True when the row shows Inclus/Gratuit/Compris/0, meaning this is a product or service which is being delivered,
 but without a price. In this case set price_unitaire=null.
-- price_unitaire (number|null) — Take the unitary price cell on the same row  if possible.
-If the cell is “Inclus/Gratuit/Compris/0”, set is_included=true and price_unitaire=null.
+- price_unitaire (number|null) — There are three possible cases:
+    -- General case, for a flat fee: Take the unitary price cell on the same row  if possible.
+    -- If the cell is “Inclus/Gratuit/Compris/0”, set is_included=true and price_unitaire=null.
+    -- If is_volume_product=True, then price_unitaire must probably be computed
+    using the loyer and quantiy. However, both of this quantities must be expressed per month basis, which is not usually the case. Use
+    quantity_periodicity to normalize quantity to a single month and loyer_periodicity to normalize loyer to a single month. Having this values
+    then compute price_unitaire = loyer_{per month}/quantiy_{per month}. for example, if semestrial quantity and monthly loyer,
+    then quantiy_{per month} = quantity / 6. Compute price_unitaire per single unit of the stated quantity. Do not rebase to “per 100 / 1 000 / 10 000”
+    unless the contract explicitly says so (e.g., “€/1000 lignes”). Keep small decimals if needed.
 - quantity (number|null) — amount of units of each service, possibly coming from the “Quantité” column of the product table.
 It's usually an integer number (01, 02, ..) expressing the a amount of served items or for volume products values like 10000, 15000, 
 expressing amount of for example bills. If absent set to null.
+- quantity_periodicity (enum: Mensuelle|Trimestrielle|Semestrielle|Annuelle|Autre|null) — cadence of the quantity measure if explicitly stated
+ (e.g., “par an” ⇒ Annuelle). Leave null if unstated.
 - is_volume_product (boolean, required) — true only if the row's base price itself is
   defined by measured usage/tiers/paliers (volume d'activité, unités d'œuvre, S1/S2).
   If the row is a flat recurring fee with separate overconsumption terms (e.g., base
@@ -157,33 +173,35 @@ expressing amount of for example bills. If absent set to null.
 - loyer (number|null) — Final price of the product for its own cadence (usually in the form of price_unitaire per quantity),
   regardless of periodicity. Example: if the row states “10 000 € par an”, then loyer=10000 and loyer_periodicity=Annuelle (also set loyer_annuele=10000).
   If one_shot_service=True, then set this to null, since it's a one time payment.
-  When is_volume_product=true, leave this field as null (the loyer cannot be calculated without knowing the consumption).
 - loyer_facturation (number|null) — This is a calculated magnitude. Is the loyer at facturation time. For example if the loyer is mensuel and the
 facturation time is trimestriel, loyer_facturation = loyer * 3. Note that if the loyer is not mensuel then it's necessary to first obtain
 the loyer mensuel by dividing the presented loyer by the amount of months considered and then apply this calculated value in the formula.
 Also note that without loyer_periodicity it is not possible to calculate this derived magnitude, and thus leave this columns as "unknown".
-When is_volume_product=true, leave this field as null (the loyer cannot be calculated without knowing the consumption).
 If one_shot_service=True, then set this to null, since it's a one time payment.
 - loyer_annuele (number|null) — This is a calculated magnitude. Is the loyer at the end of the year. For example if the loyer is mensuel then
 loyer_facturation = loyer * 12. Note that if the loyer is not mensuel then it's necessary to first obtain
 the loyer mensuel by dividing the presented loyer by the amount of months considered and then apply this calculated value in the formula
 Also note that without loyer_periodicity it is not possible to calculate this derived magnitude, and thus leave this columns as "unknown".
-When is_volume_product=true, leave this field as null (the loyer cannot be calculated without knowing the consumption).
 If one_shot_service=True, then set this to null, since it's a one time payment.
 - loyer_periodicity (enum: Mensuelle|Trimestrielle|Annuelle|null) — Set only if the same block states a cadence (e.g., Loyer mensuel). 
 If cadence appears only in distant headers or elsewhere, leave null. Do not copy billing cadence here.
 If one_shot_service=True, then set this to null, since it's a one time payment.
-When is_volume_product=true, leave this field as null (the loyer cannot be calculated without knowing the consumption).
-- total_abbonement_mensuel (number|null): the total value of the CP or AVENANT as the sum of all products having a fixed loyer (exclude volume products and
-included products which have no loyer). Only consider monthly values present in the contract. First, use the explicit monthly total if present for the CP
+- total_abbonement_mensuel (number|null): the total value of the CP or AVENANT as the sum of all products having a fixed loyer. Only consider monthly
+loyer values present in the contract. First, if possible use the explicit monthly total if present for the CP
 or AVENANT. This is an agregated quantity that has to be propagated within all rows of the CP or each AVENANT. If absent in the document, compute it as the
-sum of all recurring product loyers normalized to monthly within that same CP or avenant, excluding included/free rows, one-shot/OTC rows, 
-and volume/usage rows. This value should almost never be null. This value should be the same for all rows of a given CP or AVENANT.
+sum of all recurring product loyers normalized to monthly within that same CP or avenant, excluding included/free rows and one-shot/OTC rows.
+This value should almost never be null. This value should be the same for all rows of a given CP or AVENANT.
+For the volume products sum their monthly loyer (normalize to a monthly value using loyer_periodicity if required, that is for a periodicty different
+than monthly: e.g. loyer_periodicity=Annualle => loyer_{monthly}=loyer_{annualle}/12) to the total_abbonement_mensuel of the is_volume_product=False
+products. 
+If one_shot_service=True or is_included=True, then set this to null, since it's a one time payment.
 - one_shot_service (bool|null) — True if one shot product, paid only once, if explicitly listed. Otherwise False
 - bon_de_commande (bool|null) - If the product is of type bon commande. This is usualy commented in the contract text, referencing
 specific products. Binary value (True/False).
+- bon_de_commande_code (string|null) - Code associated to the bon de commande, present near the bon de commande reference. For example "bon de commande
+201612 054696".
 
-### Usage / surconsommation
+## Usage / surconsommation
 - usage_overconsumption_price (string|null) — Unit price for overconsumption only if shown, usually associated to volume products.
 - usage_overconsumption_periodicity (enum: Mensuelle|Trimestrielle|Semestrielle|Annuelle|Autre|null) — Frequency of overconsumption calculation 
 (how often surconsommation is computed), usually stated next to the overconsumption price.
@@ -194,7 +212,7 @@ It usually is "à terme échu" or simply "échu" since the client volume consump
  rounding, exclusions, caps). Keep original language (FR/EN), ≤160 chars, strip line breaks/spaces, and don't repeat info already captured in structured fields.
  If nothing explicit → null.
 
-### Facturation and payment modes
+## Facturation and payment modes
 - billing_frequency (string|null) — Preferably from CP “Modalités de facturation” checkbox, otherwise from CG. e.g. Trimestrielle, Annuelle.
 Note: Different from loyer_periodicity. A product can have Loyer mensuel but invoices are issued Trimestrielle.
 If one_shot_service=True, then set billing_frequency to null.
@@ -204,7 +222,7 @@ use the terms as found in the CP.
 - payment_terms (string|null) — Delay with respect to billing in which the client must pay. Short text like “A 45 jours date de facture”.
 - billing_modality_notes (string|null) — Any extra notes you need to preserve.
 
-### Revalorisation
+## Revalorisation
 - reval_method (enum: fixed_rate | index_formula | textual | null) — From CG/CP.
 - reval_rate_per (number|null) — Numeric rate when fixed. Otherwise null.
 - reval_formula (string|null) — Formula/text if index-based or complex. Possibly using Syntec and Energy values. Otherwise null.
@@ -213,7 +231,7 @@ use the terms as found in the CP.
 - reval_apply_from (string|null) — The date (usually year) from which the revalorisation takes effect (start being applied).
 - reval_source (enum: CG | CP | null) — Where the rule came from.
 
-### Evidence (fields that start with evidence_*)
+## Evidence (fields that start with evidence_*)
 - Keep every evidence_* under 80 chars after whitespace collapse. If needed, shorten
   month names (e.g., “20/03/2015, 48m + prorata [CP p8]”). Keep it as short as possible you can summarize freely all evidence columns.
   Concise quotes taken from the same row/box that justified the value for each case.
@@ -221,6 +239,8 @@ use the terms as found in the CP.
 prive a reference for each.
 - If possible evidence must come from the same block.
 - evidence_price — Short quote showing “Prix unitaire” times "quantity" = “Loyer mensuel” if available for context.
+  For volume products, quote the “Pricing mensuel volumes” cell for the period (e.g., “2016 S2 : 18 411 €”). Additionaly, present in detail
+  the formula to calculate the price_unitaire.
 - evidence_date_end_of_contract: If reconduction_tacite=False, write the reference to the 3 dates that compose this derived quantity: 
 signature date, duree_de_service and prorate (it found). If reconduction_tacite=True, then put the reference to where this is stated.
 - evidence_avenant: when a product has been modified by an avenant (data comes from an avenant file, the product code is the same or if there's no
@@ -228,7 +248,6 @@ product code, then the product description is similar), write a very short summa
 - Evidence must be a single, minimal span from the SAME block as the value.
 - Use compact tags of the source and page: [CP p12], [CG p3], [AV p2].
 - evidence_product = shortest label you used as product_name.
-- evidence_price = closest amount + local periodicity (e.g., “1 750 € HT mensuel”).
 - evidence_payment_methods = Present the value as found in CP (if present) but also mention the one found in CG. Example "Virement [CP, p12] replacing prelevement [CG, p56]".
 - If nothing explicit in that block ⇒ null.
 - total_abbonement_mensuel_evidence: list the products included under this enveloping value. Do not use full names since it could be too long, make the
@@ -254,16 +273,14 @@ if the contract is signed 01/10/2015 the prorata is the amount of month until th
 - Round to one decimal in {0.0,0.1,…,1.0}.
 - Never output 1.0 unless the evidence_* quote includes the exact value/cadence token.
 
-### Output:
+# Output:
 - When filling tool arguments, do not include raw newlines inside strings; replace internal newlines with spaces or “\n”.
 - Return an array of product rows via the tool. Each row duplicates the shared affair-level fields (company, dates, currency, etc.) for that product.
 - Emit all fields. For every product, include every property defined in the tool schema. If unknown, set null. Do not omit keys.
 """
 
 
-
-
-#TODO: include this? what are their effect exactly
+# TODO: include this? what are their effect exactly
 """
 Sanity checks:
 - For each AVENANT pricing table, count numeric amounts excluding the very last “Total abonnement …”. You must output at least that many product
@@ -271,124 +288,285 @@ Sanity checks:
  - Minimum rows sanity check. If the CP shows ≥2 priced blocks, you must output ≥2 rows (still ignore totals).
  """
 
-financial_tools = [{
-    "type": "function",
-    "function": {
-        "name": "record_products",
-        "description": "Return per-product financial/billing rows with CG/CP precedence applied and all avenants are appended.",
-        "parameters": {
-            "type": "object",
-            "properties": {
-                "products": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            # --- Affair / company ---
-                            "affair_id": { "type": ["string","null"] },
-                            "company_name": { "type": ["string","null"] },
-                            "numero_de_contrat": { "type": ["number","null"] },
-                            "reconduction_tacite": { "type": ["boolean","null"] },
-                            
-                            # --- devise_de_facturation & tax ---
-                            "devise_de_facturation": { "type": "string", "enum": ["EUR","USD","GBP","CHF","CAD","AUD","JPY"] },
-                            "tax_basis": { "type": ["string","null"], "enum": ["HT","TTC", "unknown"] },
-
-                            # --- Dates & term ---
-                            "service_start_date": { "type": ["string","null"] },
-                            "debut_facturation": { "type": ["string","null"] },
-                            "signature_date_cg": { "type": ["string","null"] },
-                            "signature_date_cp": { "type": ["string","null"] },
-                            "signature_date_av": { "type": ["string","null"] },
-                            "avenant_number": { "type": ["number","null"] },
-                            "duree_de_service": { "type": ["number","string","null"] },
-                            "duree_de_service_notes":   { "type": ["string","null"] },
-                            "date_end_of_contract":   { "type": ["string","null"] },
-                            "term_mode": { "type": ["string","null"], "enum": ["À échoir","Échu", "unknown"] },
-
-                            # --- Product identification ---
-                            "product_name": { "type": "string" },
-                            "product_code": { "type": ["string","null"] },
-                            "is_included": { "type": "boolean" },
-
-                            # --- Recurring base ---
-                            "price_unitaire": { "type": ["number","null"] },
-                            "quantity": { "type": ["number","null"] },
-                            "is_volume_product": { "type": ["boolean","null"] },
-                            "loyer": { "type": ["number","null"] },
-                            "loyer_facturation": { "type": ["number","null"] },
-                            "loyer_annuele": { "type": ["number","null"] },
-                            "loyer_periodicity": { "type": ["string","null"], "enum": ["Mensuelle","Trimestrielle","Annuelle","Autre", "unknown"] },
-                            "total_abbonement_mensuel": { "type": ["number","null"] },
-
-                            # --- One-time ---
-                            "one_shot_service": { "type": ["boolean"] },
-                            "bon_de_commande": { "type": ["boolean"] },
-                            
-
-                            # --- Usage / consumption ---
-                            "usage_overconsumption_price": { "type": ["string","null"] },
-                            "usage_overconsumption_periodicity": { "type": ["string","null"], "enum": ["Mensuelle","Trimestrielle","Annuelle","Autre", "unknown"] },
-                            "usage_notes": { "type": ["string","null"] },
-                            "usage_term_mode": { "type": ["string","null"], "enum": ["À échoir","Échu", "unknown"] },  
-                            "overconsumption_term_mode": { "type": ["string","null"], "enum": ["À échoir","Échu", "unknown"] },
-
-                            # --- Revalorization ---
-                            "reval_method": { "type": ["string","null"], "enum": ["fixed_rate","index_formula","textual", "unknown"] },
-                            "reval_rate_per": { "type": ["number","null"] },
-                            "reval_formula": { "type": ["string","null"] },
-                            "reval_compute_when": { "type": ["string","null"] },
-                            "reval_apply_when": { "type": ["string","null"] },
-                            "reval_apply_from": { "type": ["string","null"] },
-                            "reval_source": { "type": ["string","null"], "enum": ["CG","CP", "unknown"] },
-
-                            # --- Modalities ---
-                            "billing_frequency": { "type": ["string","null"], "enum": ["Mensuelle","Trimestrielle","Annuelle","Autre", "unknown"] },
-                            "payment_methods": { "type": ["array","null"], "items": { "type": "string", "enum": ["virement","prelevement","cheque","portal","other"] } },
-                            "payment_terms": { "type": ["string","null"] },
-                            "billing_modality_notes": { "type": ["string","null"] },
-
-                            # --- Evidence (short quotes ≤120 chars) ---
-                            "evidence_product": { "type": ["string","null"] },
-                            "evidence_price": { "type": ["string","null"] },
-                            "evidence_usage": { "type": ["string","null"] },
-                            "evidence_revalorization": { "type": ["string","null"] },
-                            "evidence_billing": { "type": ["string","null"] },
-                            "evidence_dates": { "type": ["string","null"] },
-                            "evidence_payment_methods": { "type": ["string","null"] },
-                            "total_abbonement_mensuel_evidence": { "type": ["string","null"] },
-                            "evidence_date_end_of_contract": { "type": ["string","null"] },
-                            "evidence_avenant": { "type": ["string","null"] },
-                            
-                            # --- Confidences (0–1) ---
-                            "confidence_price": { "type": ["number","null"], "minimum": 0, "maximum": 1 },
-                            "confidence_usage": { "type": ["number","null"], "minimum": 0, "maximum": 1 },
-                            "confidence_revalorization": { "type": ["number","null"], "minimum": 0, "maximum": 1 },
-                            "confidence_billing": { "type": ["number","null"], "minimum": 0, "maximum": 1 },
-                            "confidence_dates": { "type": ["number","null"], "minimum": 0, "maximum": 1 },
-                            "confidence_company": { "type": ["number","null"], "minimum": 0, "maximum": 1 },
-                            "confidence_avenant": { "type": ["number","null"], "minimum": 0, "maximum": 1 }
-                            
+financial_tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "record_products",
+            "description": "Return per-product financial/billing rows with CG/CP precedence applied and all avenants are appended.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "products": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                # --- Affair / company ---
+                                "affair_id": {"type": ["string", "null"]},
+                                "company_name": {"type": ["string", "null"]},
+                                "numero_de_contrat": {"type": ["string", "null"]},
+                                "reconduction_tacite": {"type": ["boolean", "null"]},
+                                # --- devise_de_facturation & tax ---
+                                "devise_de_facturation": {
+                                    "type": "string",
+                                    "enum": [
+                                        "EUR",
+                                        "USD",
+                                        "GBP",
+                                        "CHF",
+                                        "CAD",
+                                        "AUD",
+                                        "JPY",
+                                    ],
+                                },
+                                "tax_basis": {
+                                    "type": ["string", "null"],
+                                    "enum": ["HT", "TTC", "unknown"],
+                                },
+                                # --- Dates & term ---
+                                "service_start_date": {"type": ["string", "null"]},
+                                "debut_facturation": {"type": ["string", "null"]},
+                                "signature_date_cg": {"type": ["string", "null"]},
+                                "signature_date_cp": {"type": ["string", "null"]},
+                                "signature_date_av": {"type": ["string", "null"]},
+                                "avenant_number": {"type": ["number", "null"]},
+                                "duree_de_service": {
+                                    "type": ["number", "string", "null"]
+                                },
+                                "duree_de_service_notes": {"type": ["string", "null"]},
+                                "date_end_of_contract": {"type": ["string", "null"]},
+                                "term_mode": {
+                                    "type": ["string", "null"],
+                                    "enum": ["À échoir", "Échu", "unknown"],
+                                },
+                                # --- Product identification ---
+                                "product_name": {"type": "string"},
+                                "product_code": {"type": ["string", "null"]},
+                                "is_included": {"type": "boolean"},
+                                # --- Recurring base ---
+                                "price_unitaire": {"type": ["number", "null"]},
+                                "quantity": {"type": ["number", "null"]},
+                                "quantity_periodicity": {"type": ["string", "null"]},
+                                "is_volume_product": {"type": ["boolean", "null"]},
+                                "loyer": {"type": ["number", "null"]},
+                                "loyer_facturation": {"type": ["number", "null"]},
+                                "loyer_annuele": {"type": ["number", "null"]},
+                                "loyer_periodicity": {
+                                    "type": ["string", "null"],
+                                    "enum": [
+                                        "Mensuelle",
+                                        "Trimestrielle",
+                                        "Annuelle",
+                                        "Autre",
+                                        "unknown",
+                                    ],
+                                },
+                                "total_abbonement_mensuel": {
+                                    "type": ["number", "null"]
+                                },
+                                # --- One-time ---
+                                "one_shot_service": {"type": ["boolean"]},
+                                "bon_de_commande": {"type": ["boolean"]},
+                                "bon_de_commande_code": {"type": ["string"]},
+                                # --- Usage / consumption ---
+                                "usage_overconsumption_price": {
+                                    "type": ["string", "null"]
+                                },
+                                "usage_overconsumption_periodicity": {
+                                    "type": ["string", "null"],
+                                    "enum": [
+                                        "Mensuelle",
+                                        "Trimestrielle",
+                                        "Annuelle",
+                                        "Autre",
+                                        "unknown",
+                                    ],
+                                },
+                                "usage_notes": {"type": ["string", "null"]},
+                                "usage_term_mode": {
+                                    "type": ["string", "null"],
+                                    "enum": ["À échoir", "Échu", "unknown"],
+                                },
+                                "overconsumption_term_mode": {
+                                    "type": ["string", "null"],
+                                    "enum": ["À échoir", "Échu", "unknown"],
+                                },
+                                # --- Revalorization ---
+                                "reval_method": {
+                                    "type": ["string", "null"],
+                                    "enum": [
+                                        "fixed_rate",
+                                        "index_formula",
+                                        "textual",
+                                        "unknown",
+                                    ],
+                                },
+                                "reval_rate_per": {"type": ["number", "null"]},
+                                "reval_formula": {"type": ["string", "null"]},
+                                "reval_compute_when": {"type": ["string", "null"]},
+                                "reval_apply_when": {"type": ["string", "null"]},
+                                "reval_apply_from": {"type": ["string", "null"]},
+                                "reval_source": {
+                                    "type": ["string", "null"],
+                                    "enum": ["CG", "CP", "unknown"],
+                                },
+                                # --- Modalities ---
+                                "billing_frequency": {
+                                    "type": ["string", "null"],
+                                    "enum": [
+                                        "Mensuelle",
+                                        "Trimestrielle",
+                                        "Annuelle",
+                                        "Autre",
+                                        "unknown",
+                                    ],
+                                },
+                                "payment_methods": {
+                                    "type": ["array", "null"],
+                                    "items": {
+                                        "type": "string",
+                                        "enum": [
+                                            "virement",
+                                            "prelevement",
+                                            "cheque",
+                                            "portal",
+                                            "other",
+                                        ],
+                                    },
+                                },
+                                "payment_terms": {"type": ["string", "null"]},
+                                "billing_modality_notes": {"type": ["string", "null"]},
+                                # --- Evidence (short quotes ≤120 chars) ---
+                                "evidence_product": {"type": ["string", "null"]},
+                                "evidence_price": {"type": ["string", "null"]},
+                                "evidence_usage": {"type": ["string", "null"]},
+                                "evidence_revalorization": {"type": ["string", "null"]},
+                                "evidence_billing": {"type": ["string", "null"]},
+                                "evidence_dates": {"type": ["string", "null"]},
+                                "evidence_payment_methods": {
+                                    "type": ["string", "null"]
+                                },
+                                "total_abbonement_mensuel_evidence": {
+                                    "type": ["string", "null"]
+                                },
+                                "evidence_date_end_of_contract": {
+                                    "type": ["string", "null"]
+                                },
+                                "evidence_avenant": {"type": ["string", "null"]},
+                                # --- Confidences (0–1) ---
+                                "confidence_price": {
+                                    "type": ["number", "null"],
+                                    "minimum": 0,
+                                    "maximum": 1,
+                                },
+                                "confidence_usage": {
+                                    "type": ["number", "null"],
+                                    "minimum": 0,
+                                    "maximum": 1,
+                                },
+                                "confidence_revalorization": {
+                                    "type": ["number", "null"],
+                                    "minimum": 0,
+                                    "maximum": 1,
+                                },
+                                "confidence_billing": {
+                                    "type": ["number", "null"],
+                                    "minimum": 0,
+                                    "maximum": 1,
+                                },
+                                "confidence_dates": {
+                                    "type": ["number", "null"],
+                                    "minimum": 0,
+                                    "maximum": 1,
+                                },
+                                "confidence_company": {
+                                    "type": ["number", "null"],
+                                    "minimum": 0,
+                                    "maximum": 1,
+                                },
+                                "confidence_avenant": {
+                                    "type": ["number", "null"],
+                                    "minimum": 0,
+                                    "maximum": 1,
+                                },
+                            },
+                            "required": [
+                                "product_name",
+                                "is_included",
+                                "devise_de_facturation",
+                            ],
                         },
-                        "required": ["product_name", "is_included", "devise_de_facturation"]
                     }
-                }
+                },
+                "required": ["products"],
             },
-            "required": ["products"]
-        }
+        },
     }
-}]
+]
 
-col_order  = ['company_name', "numero_de_contrat" ,'signature_date_cg', 'signature_date_cp','signature_date_av','avenant_number', 'product_code', 'product_name',
-              'service_start_date','duree_de_service',  'duree_de_service_notes', "date_end_of_contract" ,'reconduction_tacite','term_mode', 'billing_frequency', "bon_de_commande" ,'payment_methods', 'payment_terms', "debut_facturation",
- 'price_unitaire',"quantity","is_volume_product","loyer","loyer_facturation","loyer_annuele",'devise_de_facturation', 'loyer_periodicity', "total_abbonement_mensuel" ,'one_shot_service', 'tax_basis','is_included',
- 'usage_overconsumption_price', 'usage_overconsumption_periodicity', 'usage_term_mode', 'overconsumption_term_mode', "usage_notes",
- 'billing_modality_notes',
- 'reval_method', 'reval_rate_per', 'reval_formula', 'reval_compute_when', 'reval_apply_when', "reval_apply_from",
-       'reval_source',  
-       'evidence_product', 'evidence_price', 'evidence_payment_methods','total_abbonement_mensuel_evidence', 'evidence_date_end_of_contract', "evidence_avenant",
-       'evidence_usage', 'evidence_revalorization', 'evidence_billing',
-       'evidence_dates', 'confidence_price',
-       'confidence_usage', 'confidence_revalorization', 'confidence_billing',
-       'confidence_dates', 'confidence_company', 'confidence_avenant'
-       ]
+col_order = [
+    "company_name",
+    "numero_de_contrat",
+    "signature_date_cg",
+    "signature_date_cp",
+    "signature_date_av",
+    "avenant_number",
+    "product_code",
+    "product_name",
+    "service_start_date",
+    "duree_de_service",
+    "duree_de_service_notes",
+    "date_end_of_contract",
+    "reconduction_tacite",
+    "term_mode",
+    "billing_frequency",
+    "bon_de_commande",
+    "bon_de_commande_code",
+    "payment_methods",
+    "payment_terms",
+    "debut_facturation",
+    "price_unitaire",
+    "quantity",
+    "quantity_periodicity",
+    "is_volume_product",
+    "loyer",
+    "loyer_facturation",
+    "loyer_annuele",
+    "devise_de_facturation",
+    "loyer_periodicity",
+    "total_abbonement_mensuel",
+    "one_shot_service",
+    "tax_basis",
+    "is_included",
+    "usage_overconsumption_price",
+    "usage_overconsumption_periodicity",
+    "usage_term_mode",
+    "overconsumption_term_mode",
+    "usage_notes",
+    "billing_modality_notes",
+    "reval_method",
+    "reval_rate_per",
+    "reval_formula",
+    "reval_compute_when",
+    "reval_apply_when",
+    "reval_apply_from",
+    "reval_source",
+    "evidence_product",
+    "evidence_price",
+    "evidence_payment_methods",
+    "total_abbonement_mensuel_evidence",
+    "evidence_date_end_of_contract",
+    "evidence_avenant",
+    "evidence_usage",
+    "evidence_revalorization",
+    "evidence_billing",
+    "evidence_dates",
+    "confidence_price",
+    "confidence_usage",
+    "confidence_revalorization",
+    "confidence_billing",
+    "confidence_dates",
+    "confidence_company",
+    "confidence_avenant",
+]
