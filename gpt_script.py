@@ -20,16 +20,17 @@ import numpy as np
 def get_cpcgav(docs, verbose=True, safe=True, avenant_ordering=True):
     # TODO: This is getting very fragile...
     # TODO: this ordering options, without llms seems fine actually.
+    cp_identifiers = ["SOUSCRIPTION", "CP", "PRESTATIONS"]
+    cg_identifiers = ["CADRE", "CG"]
     content_cadre = [
         doc.get("content", "")
         for doc in docs
-        if "CADRE".lower() in doc["id"].lower() or "CG".lower() in doc["id"].lower()
+        if  any([c_flag.lower() in doc["id"].lower() for c_flag in cg_identifiers])
     ]
     content_sous = [
         doc.get("content", "")
         for doc in docs
-        if "SOUSCRIPTION".lower() in doc["id"].lower()
-        or "CP".lower() in doc["id"].lower()
+        if any([c_flag.lower() in doc["id"].lower() for c_flag in cp_identifiers])
     ]
     if safe:
         assert len(content_cadre) >= 1 and len(content_sous) >= 1
@@ -77,37 +78,32 @@ def get_cpcgav(docs, verbose=True, safe=True, avenant_ordering=True):
     return content_cadre, content_sous, content_avenant
 
 
-def process_cgcp(content_cadre, content_sous, tools_annex, annex_prompt, do_truncation):
+def process_cgcp(content_cadre, content_sous, tools_annex, annex_prompt, do_truncation, safe_flag=False, verbose=True):
     if len(content_cadre) == 1 and len(content_sous) == 1:
         content_cadre_str = content_cadre[0]
         content_sous_str = gpt_truncation(
             content_sous[0], tools_annex, annex_prompt, do_truncation, client_oai
         )
-        return content_cadre_str, content_sous_str
     elif len(content_cadre) == 1 and len(content_sous) >= 1:
         content_cadre_str = content_cadre[0]
         content_sous_str = "\n".join(
             gpt_truncation(t, tools_annex, annex_prompt, do_truncation, client_oai)
             for t in content_sous
         )
-        return content_cadre_str, content_sous_str
+    elif safe_flag==False: #no expectation of amount of docs in cp or cg
+        content_cadre_str = "\n".join(content_cadre)
+        content_sous_str = "\n".join(content_sous)
     else:
         raise ValueError("Unexpected lengths.")
+    if verbose:
+        print("len [str] content [cg,cp]=", len(content_cadre_str), len(content_sous_str))
+    return content_cadre_str, content_sous_str
 
 
 items = cosmos_digitaliezd.read_all_items(max_item_count=100)
 print("total amount of items in DB =", len([item for item in items]))
 # for i, doc in enumerate(items, start=1):
 #    print(i, doc["id"]) #, doc.get("blob_path")
-
-# embed()
-# company_name = "S.N.F"
-# company_name = "NORAUTO" # ok after truncation
-# company_name = "SAVENCIA"
-# company_name = "BOIRON"
-# company_name = "AIRBUS-HELICOPTERS"
-company_name = "CULTURA"
-
 
 def get_docs(company_name, exclude_flag=True, verbose=True):
     doc_ids = list(
@@ -117,26 +113,37 @@ def get_docs(company_name, exclude_flag=True, verbose=True):
             enable_cross_partition_query=True,
         )
     )
-    print("numbers of docs original = ", len(doc_ids))
+    if verbose:
+        print("numbers of docs original = ", len(doc_ids))
     if exclude_flag:
         doc_ids = [doc for doc in doc_ids if "-ASP-" not in doc]
-    # print(doc_ids)
-    print("numbers of docs after exclusion = ", len(doc_ids))
+    if verbose:
+        print("numbers of docs after exclusion = ", len(doc_ids))
     docs = [cosmos_digitaliezd.read_item(item=i, partition_key=i) for i in doc_ids]
-    for doc in docs:
-        print(
-            doc["id"][-50 : len(doc["id"])], doc.get("blob_path"), doc.get("page_count")
-        )
+    if verbose:
+        print("All recuperated docs from company name:")
+        for doc in docs:
+            print(
+                doc["id"][-70 : len(doc["id"])], doc.get("blob_path"), doc.get("page_count")
+            )
     return docs
 
-
+#embed()
+safe_flag = False
+do_truncation_flag = False
+# embed()
+# company_name = "S.N.F"
+# company_name = "NORAUTO" # ok after truncation
+# company_name = "SAVENCIA"
+# company_name = "BOIRON"
+# company_name = "AIRBUS-HELICOPTERS"
+# company_name = "CULTURA"
+company_name = "suez"
 docs = get_docs(company_name)
-content_cadre, content_sous, content_avenant = get_cpcgav(docs)
-do_truncation = False
+content_cadre, content_sous, content_avenant = get_cpcgav(docs, safe=safe_flag)
 content_cadre_str, content_sous_str = process_cgcp(
-    content_cadre, content_sous, tools_annex, annex_prompt, do_truncation
+    content_cadre, content_sous, tools_annex, annex_prompt, do_truncation_flag, safe_flag=safe_flag
 )
-print("len content [cg,cp]=", len(content_cadre_str), len(content_sous_str))
 
 content_cpcg = (
     "=== DOC: CADRE — type=cadre ===\n"
@@ -175,7 +182,11 @@ messages_cpcg = [
 
 embed()
 sys.exit()
-anticache_version = "volumne_08"
+anticache_version = "newer_volumne_01"
+#TODO: try this instead tool_choice={"type":"function","function":{"name":"record_products"}}
+# TODO: copy colorder in required fiels schema
+# TODO: add this to the description of tools “Return per-product financial rows. This tool’s schema is the authoritative JSON format for output. Include all keys (use null if unknown).”
+#TODO: and this to the system prompt “Always return final results by calling record_products with a complete payload—do not write plain text.”
 df_cpcg = get_response_df(client_oai, messages_cpcg, financial_tools)
 
 validate_columns(df_cpcg, col_order)
