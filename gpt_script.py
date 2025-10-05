@@ -226,22 +226,22 @@ for i, avenant_str in enumerate(content_avenant, start=1):
     print("output shape = ", df_av.shape)
     df_av_list.append(df_av)
 
-
-df_av_all = pd.concat(df_av_list)
-validate_columns(df_av_all, col_order)
-df_av_all = df_av_all[col_order].sort_values("avenant_number")
-print("df_av_all shape = ", df_av_all.shape)
-print(
-    "AV number [len(pdfs), unique number in df]",
-    len(content_avenant),
-    df_av_all["avenant_number"].nunique(),
-)
-
-df_av_all.to_markdown(f"product_av_{anticache_version}.md", index=False)
-
-df_cpcgav_all = get_df_cpcgav_all(df_cpcg, df_av_all)
-df_cpcgav_all.to_markdown(f"product_cpcgav_{anticache_version}.md", index=False)
-df_cpcgav_all.to_excel(f"product_cpcgav_{anticache_version}.xlsx")
+if df_av_list:
+    df_av_all = pd.concat(df_av_list)
+    validate_columns(df_av_all, col_order)
+    df_av_all = df_av_all[col_order].sort_values("avenant_number")
+    print("df_av_all shape = ", df_av_all.shape)
+    print(
+        "AV number [len(pdfs), unique number in df]",
+        len(content_avenant),
+        df_av_all["avenant_number"].nunique(),
+    )
+    
+    df_av_all.to_markdown(f"product_av_{anticache_version}.md", index=False)
+    
+    df_cpcgav_all = get_df_cpcgav_all(df_cpcg, df_av_all)
+    df_cpcgav_all.to_markdown(f"product_cpcgav_{anticache_version}.md", index=False)
+    df_cpcgav_all.to_excel(f"product_cpcgav_{anticache_version}.xlsx")
 
 
 # df2json = df.replace({np.nan: None})
