@@ -21,6 +21,7 @@ from clients import client_di, container, cosms_db, cosmos_digitaliezd
 from pathlib import Path
 from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
 from azure.core.exceptions import HttpResponseError, ServiceRequestError, ServiceResponseError
+import sys
 
 def parse_blob_path(path: str):
     """
@@ -69,21 +70,27 @@ MAX_EMBED_CHARS = 6000  # simple guard to avoid very long inputs
 MAX_EMBED_CHARS = 6000  # simple guard to avoid very long inputs
 
 # list PDFs in the container (optionally: name_starts_with="subfolder/")
-pdfs = [b.name for b in container.list_blobs() if b.name.lower().endswith(".pdf")]
-print("found in blob:", pdfs)
+pdfs_all = [b.name for b in container.list_blobs() if b.name.lower().endswith(".pdf")]
+print("len(pdfs_all):", len(pdfs_all))
 
 
 #pdfs=['M/caloteries/b/Calottiers 201706 058931.pdf']
 #pdfs = [pdf for pdf in pdfs if "New contracts" in pdf]
-pdfs = [pdf for pdf in pdfs if "CULTURA" in pdf]
-print("number of pdf = ", len(pdfs))
+#pdfs = [pdf for pdf in pdfs if "CULTURA" in pdf]
+#pdfs_company = [pdf for pdf in pdfs_all if "RENAULT" in pdf or "RCI F" in pdf]
+#pdfs_company = [pdf for pdf in pdfs_all if "edenred" in pdf]
+#pdfs_company = [pdf for pdf in pdfs_all if "suez" in pdf]
+pdfs_company = [pdf for pdf in pdfs_all if "carter" in pdf]
+print(pdfs_company)
+print("len(pdfs_company) = ", len(pdfs_company))
 #pdfs = [pdf for pdf in pdfs if "Old contracts" in pdf]
 embed()
+sys.exit()
 analyse_doc_model = "prebuilt-read"
 analyse_doc_model = "prebuilt-layout"
 
-for i, pdf_name in enumerate(pdfs, start=1):
-    print(f"processing....{i}/{len(pdfs)}", pdf_name)
+for i, pdf_name in enumerate(pdfs_company, start=1):
+    print(f"processing....{i}/{len(pdfs_company)}", pdf_name)
     #breakpoint()
     pdf_bytes = container.download_blob(pdf_name).readall()
     #poller = client_di.begin_analyze_document(analyse_doc_model, pdf_bytes)
