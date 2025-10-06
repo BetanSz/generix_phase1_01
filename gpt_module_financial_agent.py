@@ -49,10 +49,15 @@ items that carry their own price or are included. Do not aggregate across blocks
 - Price extraction. Take the closest amount to the block. Set tax_basis only if HT/TTC is shown next to that amount.
 - Periodicity. Set loyer_periodicity from the local wording next to the price (e.g., mensuel/le, trimestriel/le, annuel/le).
  If not explicit on that block, leave null.
-- One-time vs recurring. If the block says OTC / mise en œuvre / one-time / setup / frais initiaux,
- set one_shot_service=true and leave loyer_periodicity=null. Otherwise, treat as recurring.
-- Usage/volume cases. If wording mentions volume / unité d'œuvre / palier / S1/S2 / dégressif /
- utilisateur supplémentaire, fill usage_* fields and summarize mechanics in usage_notes (≤100 chars). Keep loyer only if a flat fee exists on that block.
+- One-time vs recurring. If the block says OTC / mise en œuvre / one-time / setup / frais initiaux or is a setup/milestone/OTC (e.g., “On order”,
+ “After Design Phase”, “At delivery of the configuration”, “At the end of UAT”, “Production start-up”, “2 months after go live”,
+  “Kick-off”, “Hypercare”), then: set one_shot_service=true. Put the amount in price_unitaire (NOT in loyer). Set loyer, loyer_facturation, loyer_annuele, 
+  loyer_periodicity, billing_frequency, total_abbonement_mensuel = null. Set is_volume_product=false. Otherwise, treat as recurring.
+- Priority for one-shots: when one_shot_service=true, the closest amount MUST be captured in price_unitaire.
+  Do not populate loyer or any loyer_* fields for one-shots.
+- Usage/volume cases. Only recurring, consumption-based blocks can be volume products. One-shot rows can NEVER be
+  is_volume_product=true. If wording mentions volume / unité d'œuvre / palier / S1/S2 / dégressif / utilisateur
+  supplémentaire, fill usage_* fields and summarize mechanics in usage_notes (≤100 chars).
 - Naming. product_name = the shortest clear label/heading for the block. Put any explicit numeric code on that block in product_code; otherwise null.
 - Multi-line features. If many bullets describe one thing and one price is given, create one row.  If multiple prices are listed under distinct
  labels in one block, emit one row per label-price pair.
@@ -78,15 +83,24 @@ au-delà de l'engagement, utilisateur supplémentaire / seat additionnel, palier
     - usage_notes = short label, e.g. "prix par utilisateur supplémentaire".
 
 ## How to handle avenants:
-- Avenants are found after the CP. Each one is defined with the tags: start of the avenant "=== DOC: AVENANT/START ===" and
-end of the avenant "=== DOC: AVENANT/END ===". Each of these must be treated independently.
+- Avenants are found after the CP. Each one is defined with the tags: "=== DOC: AVENANT — type=avenant ===\n".
+  Each of these must be treated independently. Sometimes in the document they may be referred to as "amendment".
 - Each avenant creates additional product rows in sequential order, as defined by the signature date of the avenant;
 do not overwrite CP rows, even if the product is the same. Do not omit unchanged products already present in the CP.
+- Row creation rule for amendments: create rows ONLY from blocks that pair a concrete label with a numeric price
+  (table row, bullet, or short paragraph). Ignore methodology prose (phases, governance, calendars, UAT criteria)
+  when no price is in the same block.
 - If an avenant changes an already present product in any way, reflect the change in evidence_avenant following evidence guidelines.
-- If an avenant shows a new monthly total, put it in total_abbonement_mensuel only on the avenant rows. Copy the same total_abbonement_mensuel
-to all recurring rows within that CP/AV only; do not copy across other CP/AVs.
 - Order outputs by signature date (CP rows should come first, then avenants chronologically using their signature date).
-- When an AVENANT shows products that also exist in the CP (even with the same price), repeat them as new rows for that AVENANT. Do not omit unchanged products.
+- Implementation / milestone fees: treat as one-shot lines.
+  one_shot_service=true; price_unitaire = the total for that item; loyer/loyer_* and billing_frequency = null.
+  Set service_start_date if the block explicitly says start at signature/Go-Live/etc. Capture payment_terms/methods if stated.
+- New perimeter / affiliate priced in the amendment: emit a separate one-shot row for that perimeter.
+- Price grids shown without a chosen tier/commitment are descriptive: do NOT create rows. Create volume rows only
+  when a concrete commitment (quantity × unit price) with a cadence is stated.
+- Restated SLA without price (is_included=true; product_code if present; price_unitaire=null).
+- Overconsumption terms in amendments: if a unit price is stated, fill usage_overconsumption_price and its periodicity (if given); do not infer a base fee.
+
 
 ## How to handle Volume products (table decomposition):
 - If the CP or AVENANT shows a “Pricing mensuel volumes” table with Year and S1/S2 columns,
@@ -297,6 +311,8 @@ if the contract is signed 01/10/2015 the prorata is the amount of month until th
   or erros appear, including typos (minly in french). Consider also very clear and explicity conceptual erros within the contract.
   If none, set null. List source inconsistencies (e.g., a product shown with 920 €/mois in one annex and 919 € in another). Keep it short.
   You can summarize in this section. If something looks kind of strange you can mention it, even if it is not a full blown error.
+- For one_shot_service=True, evidence_price should quote the milestone/OTC label and its amount. There should be no loyer for this product: if evidence of
+loyer is found, explain this contradiction in evidence_price with references but keep it short.
 
 # Confidence scoring (0-1; null if the field is null)
 - Base confidence value is 0.5. Apply this heuristic rules to determine final confidence value:

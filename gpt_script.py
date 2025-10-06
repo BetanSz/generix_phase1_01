@@ -26,11 +26,13 @@ def get_cpcgav(docs, verbose=True, safe=True, avenant_ordering=True):
         doc.get("content", "")
         for doc in docs
         if  any([c_flag.lower() in doc["id"].lower() for c_flag in cg_identifiers])
+                and "avenant" not in doc["id"].lower()
     ]
     content_sous = [
         doc.get("content", "")
         for doc in docs
         if any([c_flag.lower() in doc["id"].lower() for c_flag in cp_identifiers])
+               and "avenant" not in doc["id"].lower()
     ]
     if safe:
         assert len(content_cadre) >= 1 and len(content_sous) >= 1
@@ -124,13 +126,14 @@ def get_docs(company_name, exclude_flag=True, verbose=True):
         print("All recuperated docs from company name:")
         for doc in docs:
             print(
-                doc["id"][-70 : len(doc["id"])], doc.get("blob_path"), doc.get("page_count")
+                doc["id"], doc.get("blob_path"), doc.get("page_count")
             )
     return docs
 
 #embed()
 safe_flag = False
 do_truncation_flag = False
+avenant_ordering = False
 # embed()
 # company_name = "S.N.F"
 # company_name = "NORAUTO" # ok after truncation
@@ -141,8 +144,9 @@ do_truncation_flag = False
 #company_name = "suez"
 company_name = "carter"
 company_name = "edenred"
+company_name = "renault"
 docs = get_docs(company_name)
-content_cadre, content_sous, content_avenant = get_cpcgav(docs, safe=safe_flag)
+content_cadre, content_sous, content_avenant = get_cpcgav(docs, safe=safe_flag, avenant_ordering=avenant_ordering)
 content_cadre_str, content_sous_str = process_cgcp(
     content_cadre, content_sous, tools_annex, annex_prompt, do_truncation_flag, safe_flag=safe_flag
 )
@@ -189,23 +193,36 @@ def calculate_total_abb(df):
     Use it to add to the volume calculation.
 
     Obs: needs to take a CP/CG OR avenant df at the time.
+
+    TODO: the warning is onlt valid for products which are not one shot or included. you should
+    trigger it only in those cases, actually doing the enitre calculation in those cases.
     """
+    df = df.copy()
+    one_shot_list = (df["one_shot_service"]==True).unique()
+    if len(one_shot_list)==1 and one_shot_list[0]==True: #all rows is one shot, no calculation to do
+        df["total_abbonement_mensuel_calc"]=np.nan
+        return df
     div = {"mensuelle": 1, "trimestrielle": 3, "annuelle": 12, "semestrielle":6}
+    one_shot_mask = df['one_shot_service'].astype(bool)==True
+    is_included__mask = df['is_included'].astype(bool)==True    
+    not_applicable = ~(one_shot_mask | is_included__mask)
     df["loyer_periodicity"] = df["loyer_periodicity"].str.lower()
-    #check = [periodicty in div.keys() for periodicty in df["loyer_periodicity"].unique()]
+    if any([per not in div.keys() for per in df[not_applicable]["loyer_periodicity"].unique()]):
+        print("WARNING: unknonw loyer_periodicity for total abonnemet calculation")
     #print(check)
-    df["loyer"] = (
+    df["loyer_f"] = (
     pd.to_numeric(df["loyer"].replace({"null": 0, None: 0}), errors="coerce")
       .fillna(0.0)
       .astype(float)
     )
-    df["loyer_m"] = df["loyer"] / df["loyer_periodicity"].map(div).fillna(1)
-    if any(df["loyer_m"].astype(int) != df["loyer"].astype(int)):
+    df["loyer_m"] = df["loyer_f"] / df["loyer_periodicity"].map(div).fillna(1)
+    if any(df["loyer_m"].astype(int) != df["loyer_f"].astype(int)):
         print("loyer_m calculation differs from llm's")
 
     mask_fixed = (~df["is_volume_product"]) & (~df["one_shot_service"]) & (~df["is_included"])
     total_abb_fixed = sum(np.where(mask_fixed, df["loyer_m"], 0)) #total abb for fixed products
-    print("total_abb_fixed = ", total_abb_fixed)
+    #print("total_abb_fixed = ", total_abb_fixed)
+    #print("why abb fix zero all the time?", np.where(mask_fixed, df["loyer_m"], 0))
 
     df["total_abbonement_mensuel_calc"] = np.where(
         df["is_volume_product"],
@@ -217,12 +234,45 @@ def calculate_total_abb(df):
     s = df.pop("total_abbonement_mensuel_calc")  # removes & returns the column
     i = df.columns.get_loc("total_abbonement_mensuel") + 1
     df.insert(i, "total_abbonement_mensuel_calc", s)
-    df = df.drop(columns=["loyer_m"])
+    df = df.drop(columns=["loyer_m", "loyer_f"])
+    return df
+
+def loyer2null(df, safe_flag=True):
+    df =df.copy()
+    if safe_flag==True:
+        if sorted(df["one_shot_service"].unique())!=sorted([False,  True]) or sorted(df["is_volume_product"].unique())!=sorted([False,  True]):
+            print("WARNING unsafe loyer2null call. returning original df")
+            return df
+    one_shot_mask = df['one_shot_service'].astype(bool)==True
+    not_volume_mask = df['is_volume_product'].astype(bool)==False
+    no_loyer_mask = one_shot_mask & not_volume_mask
+    # (a) If price_unitaire is NaN and loyer has a value, move loyer into price_unitaire
+
+    df["price_unitaire_f"] = pd.to_numeric(df["price_unitaire"].replace({"null": np.nan}), errors="coerce")
+    df["price_unitaire_f"].values
+
+    move_mask = one_shot_mask & df['price_unitaire_f'].isna() & df['loyer'].notna()
+    print("moving badly classified loyer to price... number of affected rows = ", sum(move_mask))
+    df.loc[move_mask, 'price_unitaire'] = df.loc[move_mask, 'loyer']
+
+    # (b) For ALL one-shot rows, null out recurring/cadence fields
+    cols_to_null = [
+        'loyer', 'loyer_facturation', 'loyer_annuele',
+        'billing_frequency', 'loyer_periodicity', 'total_abbonement_mensuel'
+    ]
+    for c in cols_to_null:
+        if c in df.columns:
+            df.loc[no_loyer_mask, c] = np.nan
+    if "total_abbonement_mensuel_calc" in df.columns:
+        df.loc[no_loyer_mask, c] = np.nan
+    else:
+        print("WARNING: total_abbonement_mensuel_calc not in cols. change of name?")
+    df =df.drop(columns=["price_unitaire_f"])
     return df
 
 embed()
 sys.exit()
-anticache_version = "carter_06"
+anticache_version = "ren_05"
 df_cpcg = get_response_df(client_oai, messages_cpcg, financial_tools)
 
 validate_columns(df_cpcg, col_order)
@@ -261,7 +311,7 @@ for i, avenant_str in enumerate(content_avenant, start=1):
             "content": f"DOCUMENT CONTENT:\n\n{content_av}\n\nTASK:\n{user_question}",
         },
     ]
-    print("content [CPCG, AV]=", len(content_av))
+    print("content [AV]=", len(content_av))
     df_av = get_response_df(client_oai, messages_av, financial_tools)
     validate_columns(df_av, col_order)
     df_av = df_av.fillna("null")
@@ -276,21 +326,20 @@ for i, avenant_str in enumerate(content_avenant, start=1):
 
 if df_av_list:
     df_av_all = pd.concat(df_av_list)
-    validate_columns(df_av_all, col_order)
-    df_av_all = df_av_all[col_order].sort_values("avenant_number")
+    #validate_columns(df_av_all, col_order)
+    df_av_all = df_av_all.sort_values("avenant_number")
     print("df_av_all shape = ", df_av_all.shape)
     print(
         "AV number [len(pdfs), unique number in df]",
         len(content_avenant),
         df_av_all["avenant_number"].nunique(),
     )
-
     df_av_all.to_markdown(f"product_av_{anticache_version}.md", index=False)
-
     df_cpcgav_all = get_df_cpcgav_all(df_cpcg, df_av_all)
+    df_cpcgav_all = loyer2null(df_cpcgav_all, safe_flag=True)
+    df_cpcgav_all = df_cpcgav_all.fillna("null")
     df_cpcgav_all.to_markdown(f"product_cpcgav_{anticache_version}.md", index=False)
     df_cpcgav_all.to_excel(f"product_cpcgav_{anticache_version}.xlsx")
-
 
 # df2json = df.replace({np.nan: None})
 # rows = json.loads(df2json.to_json(orient="records"))
