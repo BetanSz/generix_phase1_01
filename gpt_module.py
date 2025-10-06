@@ -269,12 +269,12 @@ def parse_date_from_filename(name):
         return datetime(y, mth, 1).date()
     return None
 
-def get_response_df(client_oai, message, tools,):
+def get_response_df(client_oai, message, tools):
     resp = client_oai.chat.completions.create(
         model="gpt-4.1",               # your deployment name from the portal
         messages=message,
         tools=tools,
-        tool_choice="auto",
+        tool_choice = "auto", #tool_choice={"type":"function","function":{"name":"record_products"}}, #this produced a stop termination instead of toolcals (carter)=> due to some schema mismatch?
         temperature=0.05, #0
         max_tokens=25000,
     )

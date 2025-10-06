@@ -107,7 +107,9 @@ to all recurring rows within that CP/AV only; do not copy across other CP/AVs.
 - If the "Niveau de Service (SLA)" is present, add it as an additional product including the code. Most details about this product will remain empty.
 - Specially in AVENANT parts of the contract, The phrase “d'un montant forfaitaire mensuel total de : X €” is not a recap when tied to a family/process;
  it's the price of that product line. Only the terminal line “Total abonnement…” is the recap to put in total_abbonement_mensuel.
-
+- total_abbonement_mensuel is a period-constant envelope; never copy the product's own loyer here. Rows within the same period must carry the same total.
+- If the contract has no CG, set signature_date_cg = null (do not mirror CP signature into CG).
+ 
 ## Columns to emit (tool output schema).
 - Emit one JSON object per product row that maps 1:1 to the record_products tool parameters below.
 - Do not invent fields or keys. For each key, follow the definition exactly; if a value is not explicit on the relevant block, set null. 
@@ -186,14 +188,46 @@ If one_shot_service=True, then set this to null, since it's a one time payment.
 - loyer_periodicity (enum: Mensuelle|Trimestrielle|Annuelle|null) — Set only if the same block states a cadence (e.g., Loyer mensuel). 
 If cadence appears only in distant headers or elsewhere, leave null. Do not copy billing cadence here.
 If one_shot_service=True, then set this to null, since it's a one time payment.
-- total_abbonement_mensuel (number|null): the total value of the CP or AVENANT as the sum of all products having a fixed loyer. Only consider monthly
-loyer values present in the contract. First, if possible use the explicit monthly total if present for the CP
-or AVENANT. This is an agregated quantity that has to be propagated within all rows of the CP or each AVENANT. If absent in the document, compute it as the
-sum of all recurring product loyers normalized to monthly within that same CP or avenant, excluding included/free rows and one-shot/OTC rows.
-This value should almost never be null. This value should be the same for all rows of a given CP or AVENANT.
-For the volume products sum their monthly loyer (normalize to a monthly value using loyer_periodicity if required, that is for a periodicty different
-than monthly: e.g. loyer_periodicity=Annualle => loyer_{monthly}=loyer_{annualle}/12) to the total_abbonement_mensuel of the is_volume_product=False
-products. 
+- total_abbonement_mensuel (number|null): monthly agregated total loyer:
+  total_abbonement_mensuel = loyer mensuel of fixed producs (is_volume_product=False) + loyer mensuel of volumne producs (is_volume_product=True),
+  for the row's period (CP or AVENANT). Do not copy loyer in this column. Build it using the following cases:
+  Case 1 (preferred): If the contract shows a “Total abonnement mensuel (postes fixes)” for that period, 
+  use it as loyer mensuel of fixed producs. If a volume projection exists for the same period, use it as loyer mensuel of volumne producs
+  to produce the aggregated total.
+  Case 2: If no explicit fixed total exists, compute the fixed base as the sum of the monthly loyers of all 
+  fixed-fee rows active in that period (exclude included/free, OTC, and all is_volume_product=true rows). 
+  If a volume projection exists for the same period, use it as loyer mensuel of volumne producs.
+  Case 3: If only a volume projection exists for the period (no fixed-fee rows), 
+  total_abbonement_mensuel = monthly volume loyer alone. Only in this case you can copy loyer in this column.
+  Case 4 (derivation rule): If no explicit *monthly* volume loyer is shown, derive it:
+    a) If price_unitaire and quantity are present:
+       - Convert quantity to a monthly quantity based on quantity_periodicity:
+         Mensuelle -> q_m = quantity
+         Trimestrielle -> q_m = quantity / 3
+         Semestrielle -> q_m = quantity / 6
+         Annuelle -> q_m = quantity / 12
+         Autre/Null -> cannot normalize -> volume monthly loyer = null (add evidence_total_abbonement_mensuel)
+       - volume monthly loyer = price_unitaire * q_m
+    b) Else if loyer is present with loyer_periodicity:
+       Mensuelle -> volume monthly loyer = loyer
+       Trimestrielle -> volume monthly loyer = loyer / 3
+       Annuelle -> volume monthly loyer = loyer / 12
+       Null/Autre -> cannot normalize -> volume monthly loyer = null (add total_abbonement_mensuel)
+  The final total_abbonement_mensuel must be identical for all rows within the same period. 
+  It should almost never be null; if it is, add a total_abbonement_mensuel note explaining why (e.g., missing periodicity).
+  Evidence: in total_abbonement_mensuel_evidence, show a compact formula, e.g. 
+  "Fixes=6 025 + Volume(100 000×0,0412=4 116) = 10 141 [CP, pg12]".
+  Rules:
+  - Do not set this field to the product's own loyer.
+  - It must be identical for all rows that belong to the same period.
+  - A period (for totals) is defined as: a continuous date range during which the fixed-fee set and (if present) the volume projection are 
+  constant per the contract. Period boundaries come from, in order: (1) rows in “Total abonnement mensuel (postes fixes)” (each starts a new period),
+  (2) dated activations/changes of fixed-fee products, (3) explicit date ranges on volume projections (these create sub-periods for the blended total).
+  Assign each product row to the period that contains its start date (intervals are left-closed/right-open). total_abbonement_mensuel is period-constant:
+  for a period it equals the fixed base, or fixed base + monthly volume loyer; if only volume exists, use the monthly volume loyer.
+  Normalize volume to monthly (Trimestrielle ÷3, Semestrielle ÷6, Annuelle ÷12). If normalization is impossible, set total_abbonement_mensuel=null
+  and briefly explain in total_abbonement_mensuel_evidence.
+  
 If one_shot_service=True or is_included=True, then set this to null, since it's a one time payment.
 - one_shot_service (bool|null) — True if one shot product, paid only once, if explicitly listed. Otherwise False
 - bon_de_commande (bool|null) - If the product is of type bon commande. This is usualy commented in the contract text, referencing
@@ -226,6 +260,7 @@ use the terms as found in the CP.
 - reval_method (enum: fixed_rate | index_formula | textual | null) — From CG/CP.
 - reval_rate_per (number|null) — Numeric rate when fixed. Otherwise null.
 - reval_formula (string|null) — Formula/text if index-based or complex. Possibly using Syntec and Energy values. Otherwise null.
+If the contract sets a cap (e.g., "plafonnée à 3%"), append it to reval_formula: e.g., "PN = PN-1 × (SN/SN-1), plafonnée à 3%".
 - reval_compute_when (string|null) — When it is calculated (e.g., “annuellement”).
 - reval_apply_when (string|null) — The date in which it is applied (e.g., “le 1er janvier”).
 - reval_apply_from (string|null) — The date (usually year) from which the revalorisation takes effect (start being applied).
@@ -257,9 +292,14 @@ Propagate this enveloping value as found in the CP or the AVENANT for all rows a
 each CP or each AVENANT). This is an aggregated calculation.
 - evidence_dates: summarize the evidence of all the dates used to calculate any duration. In particular express the prorata in month: for example
 if the contract is signed 01/10/2015 the prorata is the amount of month until the end of the year, so prorata(signed=01/10/2015) = 2 months.
+- evidence_contract_errors (array of strings | null) — List of short flags about inconsistencies, conflicts, or cross-section mismatches
+  detected in this contract (e.g., "Éditique 920€/mois in Annexe 3.4 vs 919€ elsewhere"). Keep each item ≤140 chars. Add the references where contradictions
+  or erros appear, including typos (minly in french). Consider also very clear and explicity conceptual erros within the contract.
+  If none, set null. List source inconsistencies (e.g., a product shown with 920 €/mois in one annex and 919 € in another). Keep it short.
+  You can summarize in this section. If something looks kind of strange you can mention it, even if it is not a full blown error.
 
-### Confidence scoring (0-1; null if the field is null)
-- Start at 0.6.
+# Confidence scoring (0-1; null if the field is null)
+- Base confidence value is 0.5. Apply this heuristic rules to determine final confidence value:
 - (+0.2) if an evidence_* quote from the same block is provided.
 - (+0.1) if the value is explicitly labeled (e.g., “mensuel”, “HT”).
 - (+0.1) if all the fields values are nearby in the document.
@@ -272,11 +312,12 @@ if the contract is signed 01/10/2015 the prorata is the amount of month until th
 - (-0.1) obvious OCR garbling.
 - Round to one decimal in {0.0,0.1,…,1.0}.
 - Never output 1.0 unless the evidence_* quote includes the exact value/cadence token.
+- If the corresponding evidence_* is **null**, cap that confidence_* at **0.7** (even if other positives apply).
 
 # Output:
+- Always return final results by calling record_products with a complete payload. Do not write plain text.
 - When filling tool arguments, do not include raw newlines inside strings; replace internal newlines with spaces or “\n”.
-- Return an array of product rows via the tool. Each row duplicates the shared affair-level fields (company, dates, currency, etc.) for that product.
-- Emit all fields. For every product, include every property defined in the tool schema. If unknown, set null. Do not omit keys.
+- Each row duplicates the shared affair-level fields (company, dates, currency, etc.) for that product.
 """
 
 
@@ -288,12 +329,81 @@ Sanity checks:
  - Minimum rows sanity check. If the CP shows ≥2 priced blocks, you must output ≥2 rows (still ignore totals).
  """
 
+
+col_order = [
+    "company_name",
+    "numero_de_contrat",
+    "signature_date_cg",
+    "signature_date_cp",
+    "signature_date_av",
+    "avenant_number",
+    "product_code",
+    "product_name",
+    "service_start_date",
+    "duree_de_service",
+    "duree_de_service_notes",
+    "date_end_of_contract",
+    "reconduction_tacite",
+    "term_mode",
+    "billing_frequency",
+    "bon_de_commande",
+    "bon_de_commande_code",
+    "payment_methods",
+    "payment_terms",
+    "debut_facturation",
+    "price_unitaire",
+    "quantity",
+    "quantity_periodicity",
+    "is_volume_product",
+    "loyer",
+    "loyer_facturation",
+    "loyer_annuele",
+    "devise_de_facturation",
+    "loyer_periodicity",
+    "total_abbonement_mensuel",
+    "one_shot_service",
+    "tax_basis",
+    "is_included",
+    "usage_overconsumption_price",
+    "usage_overconsumption_periodicity",
+    "usage_term_mode",
+    "overconsumption_term_mode",
+    "usage_notes",
+    "billing_modality_notes",
+    "reval_method",
+    "reval_rate_per",
+    "reval_formula",
+    "reval_compute_when",
+    "reval_apply_when",
+    "reval_apply_from",
+    "reval_source",
+    "evidence_product",
+    "evidence_price",
+    "evidence_payment_methods",
+    "total_abbonement_mensuel_evidence",
+    "evidence_date_end_of_contract",
+    "evidence_avenant",
+    "evidence_usage",
+    "evidence_revalorization",
+    "evidence_billing",
+    "evidence_dates",
+    "evidence_contract_errors",
+    "confidence_price",
+    "confidence_usage",
+    "confidence_revalorization",
+    "confidence_billing",
+    "confidence_dates",
+    "confidence_company",
+    "confidence_avenant",
+]
+
+
 financial_tools = [
     {
         "type": "function",
         "function": {
             "name": "record_products",
-            "description": "Return per-product financial/billing rows with CG/CP precedence applied and all avenants are appended.",
+            "description": "Return per-product financial rows. This tool's schema is the authoritative JSON format for output. Include all keys (use null if unknown).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -444,6 +554,7 @@ financial_tools = [
                                 "evidence_revalorization": {"type": ["string", "null"]},
                                 "evidence_billing": {"type": ["string", "null"]},
                                 "evidence_dates": {"type": ["string", "null"]},
+                                "evidence_contract_errors": {"type": ["string", "null"]},
                                 "evidence_payment_methods": {
                                     "type": ["string", "null"]
                                 },
@@ -491,11 +602,7 @@ financial_tools = [
                                     "maximum": 1,
                                 },
                             },
-                            "required": [
-                                "product_name",
-                                "is_included",
-                                "devise_de_facturation",
-                            ],
+                            "required": col_order,
                         },
                     }
                 },
@@ -503,70 +610,4 @@ financial_tools = [
             },
         },
     }
-]
-
-col_order = [
-    "company_name",
-    "numero_de_contrat",
-    "signature_date_cg",
-    "signature_date_cp",
-    "signature_date_av",
-    "avenant_number",
-    "product_code",
-    "product_name",
-    "service_start_date",
-    "duree_de_service",
-    "duree_de_service_notes",
-    "date_end_of_contract",
-    "reconduction_tacite",
-    "term_mode",
-    "billing_frequency",
-    "bon_de_commande",
-    "bon_de_commande_code",
-    "payment_methods",
-    "payment_terms",
-    "debut_facturation",
-    "price_unitaire",
-    "quantity",
-    "quantity_periodicity",
-    "is_volume_product",
-    "loyer",
-    "loyer_facturation",
-    "loyer_annuele",
-    "devise_de_facturation",
-    "loyer_periodicity",
-    "total_abbonement_mensuel",
-    "one_shot_service",
-    "tax_basis",
-    "is_included",
-    "usage_overconsumption_price",
-    "usage_overconsumption_periodicity",
-    "usage_term_mode",
-    "overconsumption_term_mode",
-    "usage_notes",
-    "billing_modality_notes",
-    "reval_method",
-    "reval_rate_per",
-    "reval_formula",
-    "reval_compute_when",
-    "reval_apply_when",
-    "reval_apply_from",
-    "reval_source",
-    "evidence_product",
-    "evidence_price",
-    "evidence_payment_methods",
-    "total_abbonement_mensuel_evidence",
-    "evidence_date_end_of_contract",
-    "evidence_avenant",
-    "evidence_usage",
-    "evidence_revalorization",
-    "evidence_billing",
-    "evidence_dates",
-    "confidence_price",
-    "confidence_usage",
-    "confidence_revalorization",
-    "confidence_billing",
-    "confidence_dates",
-    "confidence_company",
-    "confidence_avenant",
 ]

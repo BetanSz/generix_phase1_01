@@ -138,7 +138,9 @@ do_truncation_flag = False
 # company_name = "BOIRON"
 # company_name = "AIRBUS-HELICOPTERS"
 # company_name = "CULTURA"
-company_name = "suez"
+#company_name = "suez"
+company_name = "carter"
+company_name = "edenred"
 docs = get_docs(company_name)
 content_cadre, content_sous, content_avenant = get_cpcgav(docs, safe=safe_flag)
 content_cadre_str, content_sous_str = process_cgcp(
@@ -180,19 +182,59 @@ messages_cpcg = [
     },
 ]
 
+def calculate_total_abb(df):
+    """
+    Re-do loyer mensuel.
+    Get the total_abb for fixed products which are not volumne, one shot or included
+    Use it to add to the volume calculation.
+
+    Obs: needs to take a CP/CG OR avenant df at the time.
+    """
+    div = {"mensuelle": 1, "trimestrielle": 3, "annuelle": 12, "semestrielle":6}
+    df["loyer_periodicity"] = df["loyer_periodicity"].str.lower()
+    #check = [periodicty in div.keys() for periodicty in df["loyer_periodicity"].unique()]
+    #print(check)
+    df["loyer"] = (
+    pd.to_numeric(df["loyer"].replace({"null": 0, None: 0}), errors="coerce")
+      .fillna(0.0)
+      .astype(float)
+    )
+    df["loyer_m"] = df["loyer"] / df["loyer_periodicity"].map(div).fillna(1)
+    if any(df["loyer_m"].astype(int) != df["loyer"].astype(int)):
+        print("loyer_m calculation differs from llm's")
+
+    mask_fixed = (~df["is_volume_product"]) & (~df["one_shot_service"]) & (~df["is_included"])
+    total_abb_fixed = sum(np.where(mask_fixed, df["loyer_m"], 0)) #total abb for fixed products
+    print("total_abb_fixed = ", total_abb_fixed)
+
+    df["total_abbonement_mensuel_calc"] = np.where(
+        df["is_volume_product"],
+        total_abb_fixed + df["loyer_m"],
+        total_abb_fixed
+    )
+    null_mask = df["one_shot_service"] | df["is_included"]
+    df.loc[null_mask, "total_abbonement_mensuel_calc"] = np.nan
+    s = df.pop("total_abbonement_mensuel_calc")  # removes & returns the column
+    i = df.columns.get_loc("total_abbonement_mensuel") + 1
+    df.insert(i, "total_abbonement_mensuel_calc", s)
+    df = df.drop(columns=["loyer_m"])
+    return df
+
 embed()
 sys.exit()
-anticache_version = "newer_volumne_01"
-#TODO: try this instead tool_choice={"type":"function","function":{"name":"record_products"}}
-# TODO: copy colorder in required fiels schema
-# TODO: add this to the description of tools “Return per-product financial rows. This tool’s schema is the authoritative JSON format for output. Include all keys (use null if unknown).”
-#TODO: and this to the system prompt “Always return final results by calling record_products with a complete payload—do not write plain text.”
+anticache_version = "carter_06"
 df_cpcg = get_response_df(client_oai, messages_cpcg, financial_tools)
 
 validate_columns(df_cpcg, col_order)
 df_cpcg = df_cpcg.fillna("null")
 df_cpcg = df_cpcg[col_order]
 print("df_cpcg shape = ", df_cpcg.shape)
+try:
+    df_cpcg = calculate_total_abb(df_cpcg)
+except Exception as e:
+    print("DETERMINISTIC DF NOT CALCULATED")
+    print(e)
+    df_cpcg["total_abbonement_mensuel_calc"] = np.nan
 df_cpcg.to_markdown(f"product_cpcg_{anticache_version}.md", index=False)
 df_cpcg.to_excel(f"product_cpcg_{anticache_version}.xlsx")
 
@@ -223,6 +265,12 @@ for i, avenant_str in enumerate(content_avenant, start=1):
     df_av = get_response_df(client_oai, messages_av, financial_tools)
     validate_columns(df_av, col_order)
     df_av = df_av.fillna("null")
+    try:
+        df_av = calculate_total_abb(df_av)
+    except Exception as e:
+        print("DETERMINISTIC DF NOT CALCULATED")
+        print(e)
+        df_av["total_abbonement_mensuel_calc"] = np.nan
     print("output shape = ", df_av.shape)
     df_av_list.append(df_av)
 
@@ -236,9 +284,9 @@ if df_av_list:
         len(content_avenant),
         df_av_all["avenant_number"].nunique(),
     )
-    
+
     df_av_all.to_markdown(f"product_av_{anticache_version}.md", index=False)
-    
+
     df_cpcgav_all = get_df_cpcgav_all(df_cpcg, df_av_all)
     df_cpcgav_all.to_markdown(f"product_cpcgav_{anticache_version}.md", index=False)
     df_cpcgav_all.to_excel(f"product_cpcgav_{anticache_version}.xlsx")
