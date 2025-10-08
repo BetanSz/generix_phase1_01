@@ -15,7 +15,8 @@ information about the products, and other aspects of the contract.
 Include items marked Inclus/Gratuit/Compris/0 with is_included=true and price_unitaire=null (or 0 only if literally “0”).
 - Do not create rows for totals/recaps; only for underlying items (i.e. products) that usually carry their own price.
 - Create a product row for each product present in the avenant.
-- Include products even if free/included (e.g., SLA); they still get a row.
+- Include products even if free/included. For example the product "Niveau de service (SLA)" or simply SLA tends to be included without at price, and
+must olways be present in the output if retained by the client.
 - Product description or code in the avenant may repeat a product already present in the CP. Keep all of them, as to preserve the chronological history
 of the contract product changes in time. 
 - If a value is not present or unclear, set to null. Do not guess.
@@ -33,7 +34,8 @@ Use the string "unknown" when the field should exist in this contract (typical C
 - If CP is silent, fall back to CG.
 - Treat each product present in the AVENANT section as separate products, even if they repeat with respect to the CP. 
 - Older contracts are before 2023.
-- In newer contracts products are usually found in “Abonnement …” and “Services associés/Options”.
+- In newer contracts products are usually found in “Abonnement …”, “Services associés/Options”, "Base de calcul du montant de l'Abonnement".
+  Sometimes it can also be found in an annex such as "ANNEXE 5 : Conditions Financières".
 - In older contracts  products are usually found in "Prix, modalites de facturation et de reglement".
 - In avenants products are usually found under "2 ARTICLE 5.2 - ABONNEMENT" or "Modifications de l'article 5.2 des Conditions Particulières du Contrat".
 
@@ -115,10 +117,13 @@ do not overwrite CP rows, even if the product is the same. Do not omit unchanged
 - Loyer can for exmaple be "Pricing mensual volumes".
 - since the table states an explicit monthly price for that commitment period.
 - Do NOT aggregate these; do NOT replace them with one generic “volume” row.
+- Many times, the SLA agreement (wich must be included in the output) is found in the volumne description, for example: 
+"Le montant de l'Abonnement au Volume d'activité est calculé en fonction du nombre mensuel de factures entrantes et sortantes et du Niveau de Services (SLA)"
 
 ## Edge cases to consider:
 - If reconduction_tacite=True, ignore duration/prorata and set date_end_of_contract="2099-12-31". In evidence_date_end_of_contract, cite the reconduction clause.
 - If the "Niveau de Service (SLA)" is present, add it as an additional product including the code. Most details about this product will remain empty.
+  Common cases of SLA agreement is "SLA GIS Standard" having the code: 04311 or "SLA GIS Premium" having the code: 04317.
 - Specially in AVENANT parts of the contract, The phrase “d'un montant forfaitaire mensuel total de : X €” is not a recap when tied to a family/process;
  it's the price of that product line. Only the terminal line “Total abonnement…” is the recap to put in total_abbonement_mensuel.
 - total_abbonement_mensuel is a period-constant envelope; never copy the product's own loyer here. Rows within the same period must carry the same total.

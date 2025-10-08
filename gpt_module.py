@@ -276,7 +276,7 @@ def get_response_df(client_oai, message, tools):
         tools=tools,
         tool_choice = "auto", #tool_choice={"type":"function","function":{"name":"record_products"}}, #this produced a stop termination instead of toolcals (carter)=> due to some schema mismatch?
         temperature=0.05, #0
-        max_tokens=25000,
+        max_tokens=32000,
     )
     print_resp_properties(resp)
     tool_call = resp.choices[0].message.tool_calls[0]

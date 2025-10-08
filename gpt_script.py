@@ -141,10 +141,10 @@ avenant_ordering = False
 # company_name = "BOIRON"
 # company_name = "AIRBUS-HELICOPTERS"
 # company_name = "CULTURA"
-#company_name = "suez"
-company_name = "carter"
-company_name = "edenred"
-company_name = "renault"
+company_name = "suez"
+#company_name = "carter"
+#company_name = "edenred"
+#company_name = "renault"
 docs = get_docs(company_name)
 content_cadre, content_sous, content_avenant = get_cpcgav(docs, safe=safe_flag, avenant_ordering=avenant_ordering)
 content_cadre_str, content_sous_str = process_cgcp(
@@ -272,7 +272,9 @@ def loyer2null(df, safe_flag=True):
 
 embed()
 sys.exit()
-anticache_version = "ren_05"
+#TOOD: this is a big one, for 12 products the resp is at token limit befor summarization. Less columns are required for this model,
+# or fillding them in a smarter way, like repeat less known values (currency dates, or ask for less evidence)
+anticache_version = "suez_big_token"
 df_cpcg = get_response_df(client_oai, messages_cpcg, financial_tools)
 
 validate_columns(df_cpcg, col_order)
