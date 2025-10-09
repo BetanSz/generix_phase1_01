@@ -47,14 +47,14 @@ Use the string "unknown" when the field should exist in this contract (typical C
 natural language.
 - Do not make rows for “Total / Sous-total / Récapitulatif / recaps /Total abonnement /Total abonnement aux Process métier …”. Only record the underlying 
 items that carry their own price or are included. Do not aggregate across blocks: one row per priced block. If a block shows only a total,
- do not produce a row and use the child items that carry their own prices. These aggregated magnitudes can only be present in total_abbonement_mensuel.
+ do not produce a row and use the child items that carry their own prices.
 - Price extraction. Take the closest amount to the block. Set tax_basis only if HT/TTC is shown next to that amount.
 - Periodicity. Set loyer_periodicity from the local wording next to the price (e.g., mensuel/le, trimestriel/le, annuel/le).
  If not explicit on that block, leave null.
 - One-time vs recurring. If the block says OTC / mise en œuvre / one-time / setup / frais initiaux or is a setup/milestone/OTC (e.g., “On order”,
  “After Design Phase”, “At delivery of the configuration”, “At the end of UAT”, “Production start-up”, “2 months after go live”,
   “Kick-off”, “Hypercare”), then: set one_shot_service=true. Put the amount in price_unitaire (NOT in loyer). Set loyer, loyer_facturation, loyer_annuele, 
-  loyer_periodicity, billing_frequency, total_abbonement_mensuel = null. Set is_volume_product=false. Otherwise, treat as recurring.
+  loyer_periodicity, billing_frequency. Set is_volume_product=false. Otherwise, treat as recurring.
 - Priority for one-shots: when one_shot_service=true, the closest amount MUST be captured in price_unitaire.
   Do not populate loyer or any loyer_* fields for one-shots.
 - Usage/volume cases. Only recurring, consumption-based blocks can be volume products. One-shot rows can NEVER be
@@ -125,8 +125,7 @@ do not overwrite CP rows, even if the product is the same. Do not omit unchanged
 - If the "Niveau de Service (SLA)" is present, add it as an additional product including the code. Most details about this product will remain empty.
   Common cases of SLA agreement is "SLA GIS Standard" having the code: 04311 or "SLA GIS Premium" having the code: 04317.
 - Specially in AVENANT parts of the contract, The phrase “d'un montant forfaitaire mensuel total de : X €” is not a recap when tied to a family/process;
- it's the price of that product line. Only the terminal line “Total abonnement…” is the recap to put in total_abbonement_mensuel.
-- total_abbonement_mensuel is a period-constant envelope; never copy the product's own loyer here. Rows within the same period must carry the same total.
+ it's the price of that product line.
 - If the contract has no CG, set signature_date_cg = null (do not mirror CP signature into CG).
  
 ## Columns to emit (tool output schema).
@@ -206,47 +205,6 @@ Also note that without loyer_periodicity it is not possible to calculate this de
 If one_shot_service=True, then set this to null, since it's a one time payment.
 - loyer_periodicity (enum: Mensuelle|Trimestrielle|Annuelle|null) — Set only if the same block states a cadence (e.g., Loyer mensuel). 
 If cadence appears only in distant headers or elsewhere, leave null. Do not copy billing cadence here.
-If one_shot_service=True, then set this to null, since it's a one time payment.
-- total_abbonement_mensuel (number|null): monthly agregated total loyer:
-  total_abbonement_mensuel = loyer mensuel of fixed producs (is_volume_product=False) + loyer mensuel of volumne producs (is_volume_product=True),
-  for the row's period (CP or AVENANT). Do not copy loyer in this column. Build it using the following cases:
-  Case 1 (preferred): If the contract shows a “Total abonnement mensuel (postes fixes)” for that period, 
-  use it as loyer mensuel of fixed producs. If a volume projection exists for the same period, use it as loyer mensuel of volumne producs
-  to produce the aggregated total.
-  Case 2: If no explicit fixed total exists, compute the fixed base as the sum of the monthly loyers of all 
-  fixed-fee rows active in that period (exclude included/free, OTC, and all is_volume_product=true rows). 
-  If a volume projection exists for the same period, use it as loyer mensuel of volumne producs.
-  Case 3: If only a volume projection exists for the period (no fixed-fee rows), 
-  total_abbonement_mensuel = monthly volume loyer alone. Only in this case you can copy loyer in this column.
-  Case 4 (derivation rule): If no explicit *monthly* volume loyer is shown, derive it:
-    a) If price_unitaire and quantity are present:
-       - Convert quantity to a monthly quantity based on quantity_periodicity:
-         Mensuelle -> q_m = quantity
-         Trimestrielle -> q_m = quantity / 3
-         Semestrielle -> q_m = quantity / 6
-         Annuelle -> q_m = quantity / 12
-         Autre/Null -> cannot normalize -> volume monthly loyer = null (add evidence_total_abbonement_mensuel)
-       - volume monthly loyer = price_unitaire * q_m
-    b) Else if loyer is present with loyer_periodicity:
-       Mensuelle -> volume monthly loyer = loyer
-       Trimestrielle -> volume monthly loyer = loyer / 3
-       Annuelle -> volume monthly loyer = loyer / 12
-       Null/Autre -> cannot normalize -> volume monthly loyer = null (add total_abbonement_mensuel)
-  The final total_abbonement_mensuel must be identical for all rows within the same period. 
-  It should almost never be null; if it is, add a total_abbonement_mensuel note explaining why (e.g., missing periodicity).
-  Evidence: in total_abbonement_mensuel_evidence, show a compact formula, e.g. 
-  "Fixes=6 025 + Volume(100 000×0,0412=4 116) = 10 141 [CP, pg12]".
-  Rules:
-  - Do not set this field to the product's own loyer.
-  - It must be identical for all rows that belong to the same period.
-  - A period (for totals) is defined as: a continuous date range during which the fixed-fee set and (if present) the volume projection are 
-  constant per the contract. Period boundaries come from, in order: (1) rows in “Total abonnement mensuel (postes fixes)” (each starts a new period),
-  (2) dated activations/changes of fixed-fee products, (3) explicit date ranges on volume projections (these create sub-periods for the blended total).
-  Assign each product row to the period that contains its start date (intervals are left-closed/right-open). total_abbonement_mensuel is period-constant:
-  for a period it equals the fixed base, or fixed base + monthly volume loyer; if only volume exists, use the monthly volume loyer.
-  Normalize volume to monthly (Trimestrielle ÷3, Semestrielle ÷6, Annuelle ÷12). If normalization is impossible, set total_abbonement_mensuel=null
-  and briefly explain in total_abbonement_mensuel_evidence.
-  
 If one_shot_service=True or is_included=True, then set this to null, since it's a one time payment.
 - one_shot_service (bool|null) — True if one shot product, paid only once, if explicitly listed. Otherwise False
 - bon_de_commande (bool|null) - If the product is of type bon commande. This is usualy commented in the contract text, referencing
@@ -304,11 +262,6 @@ product code, then the product description is similar), write a very short summa
 - evidence_product = shortest label you used as product_name.
 - evidence_payment_methods = Present the value as found in CP (if present) but also mention the one found in CG. Example "Virement [CP, p12] replacing prelevement [CG, p56]".
 - If nothing explicit in that block ⇒ null.
-- total_abbonement_mensuel_evidence: list the products included under this enveloping value. Do not use full names since it could be too long, make the
-list short if possible. If product codes are available use those instead of the product name. After that write the explicit formula to 
-arriving at this value. For example, if 3 products having a loyer of 1550, 200 and 150 are present, then write them as “WMS+KPI+Cloisonnement (1550+200+150=1900)”.
-Propagate this enveloping value as found in the CP or the AVENANT for all rows and product type therein (they should be the same for
-each CP or each AVENANT). This is an aggregated calculation.
 - evidence_dates: summarize the evidence of all the dates used to calculate any duration. In particular express the prorata in month: for example
 if the contract is signed 01/10/2015 the prorata is the amount of month until the end of the year, so prorata(signed=01/10/2015) = 2 months.
 - evidence_contract_errors (array of strings | null) — List of short flags about inconsistencies, conflicts, or cross-section mismatches
@@ -381,7 +334,6 @@ col_order = [
     "loyer_annuele",
     "devise_de_facturation",
     "loyer_periodicity",
-    "total_abbonement_mensuel",
     "one_shot_service",
     "tax_basis",
     "is_included",
@@ -401,7 +353,6 @@ col_order = [
     "evidence_product",
     "evidence_price",
     "evidence_payment_methods",
-    "total_abbonement_mensuel_evidence",
     "evidence_date_end_of_contract",
     "evidence_avenant",
     "evidence_usage",
@@ -493,9 +444,6 @@ financial_tools = [
                                         "unknown",
                                     ],
                                 },
-                                "total_abbonement_mensuel": {
-                                    "type": ["number", "null"]
-                                },
                                 # --- One-time ---
                                 "one_shot_service": {"type": ["boolean"]},
                                 "bon_de_commande": {"type": ["boolean"]},
@@ -577,9 +525,6 @@ financial_tools = [
                                 "evidence_dates": {"type": ["string", "null"]},
                                 "evidence_contract_errors": {"type": ["string", "null"]},
                                 "evidence_payment_methods": {
-                                    "type": ["string", "null"]
-                                },
-                                "total_abbonement_mensuel_evidence": {
                                     "type": ["string", "null"]
                                 },
                                 "evidence_date_end_of_contract": {

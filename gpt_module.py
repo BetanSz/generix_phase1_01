@@ -299,3 +299,54 @@ def get_df_cpcgav_all(df_cpcg, df_av_all):
     df_cpcgav_all = df_cpcgav_all.drop(columns=["signature_date_any"])
     df_cpcgav_all = df_cpcgav_all.reset_index(drop=True)
     return df_cpcgav_all
+
+def calculate_total_abb(df):
+    """
+    Re-do loyer mensuel.
+    Get the total_abb for fixed products which are not volumne, one shot or included
+    Use it to add to the volume calculation.
+
+    Obs: needs to take a CP/CG OR avenant df at the time.
+
+    TODO: the warning is onlt valid for products which are not one shot or included. you should
+    trigger it only in those cases, actually doing the enitre calculation in those cases.
+    """
+    df = df.copy()
+    one_shot_list = (df["one_shot_service"]==True).unique()
+    if len(one_shot_list)==1 and one_shot_list[0]==True: #all rows is one shot, no calculation to do
+        df["total_abbonement_mensuel_calc"]=np.nan
+        return df
+    div = {"mensuelle": 1, "trimestrielle": 3, "annuelle": 12, "semestrielle":6}
+    one_shot_mask = df['one_shot_service'].astype(bool)==True
+    is_included__mask = df['is_included'].astype(bool)==True    
+    not_applicable = ~(one_shot_mask | is_included__mask)
+    df["loyer_periodicity"] = df["loyer_periodicity"].str.lower()
+    if any([per not in div.keys() for per in df[not_applicable]["loyer_periodicity"].unique()]):
+        print("WARNING: unknonw loyer_periodicity for total abonnemet calculation")
+    #print(check)
+    df["loyer_f"] = (
+    pd.to_numeric(df["loyer"].replace({"null": 0, None: 0}), errors="coerce")
+      .fillna(0.0)
+      .astype(float)
+    )
+    df["loyer_m"] = df["loyer_f"] / df["loyer_periodicity"].map(div).fillna(1)
+    if any(df["loyer_m"].astype(int) != df["loyer_f"].astype(int)):
+        print("loyer_m calculation differs from llm's")
+
+    mask_fixed = (~df["is_volume_product"]) & (~df["one_shot_service"]) & (~df["is_included"])
+    total_abb_fixed = sum(np.where(mask_fixed, df["loyer_m"], 0)) #total abb for fixed products
+    #print("total_abb_fixed = ", total_abb_fixed)
+    #print("why abb fix zero all the time?", np.where(mask_fixed, df["loyer_m"], 0))
+
+    df["total_abbonement_mensuel_calc"] = np.where(
+        df["is_volume_product"],
+        total_abb_fixed + df["loyer_m"],
+        total_abb_fixed
+    )
+    null_mask = df["one_shot_service"] | df["is_included"]
+    df.loc[null_mask, "total_abbonement_mensuel_calc"] = np.nan
+    s = df.pop("total_abbonement_mensuel_calc")  # removes & returns the column
+    i = df.columns.get_loc("total_abbonement_mensuel") + 1
+    df.insert(i, "total_abbonement_mensuel_calc", s)
+    df = df.drop(columns=["loyer_m", "loyer_f"])
+    return df
