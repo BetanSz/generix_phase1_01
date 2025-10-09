@@ -104,8 +104,6 @@ def process_cgcp(content_cadre, content_sous, tools_annex, annex_prompt, do_trun
 
 items = cosmos_digitaliezd.read_all_items(max_item_count=100)
 print("total amount of items in DB =", len([item for item in items]))
-# for i, doc in enumerate(items, start=1):
-#    print(i, doc["id"]) #, doc.get("blob_path")
 
 def get_docs(company_name, exclude_flag=True, verbose=True):
     doc_ids = list(
@@ -130,7 +128,9 @@ def get_docs(company_name, exclude_flag=True, verbose=True):
             )
     return docs
 
-#embed()
+embed()
+for i, doc in enumerate(items, start=1):
+    print(i, doc["id"]) #, doc.get("blob_path")
 safe_flag = False
 do_truncation_flag = False
 avenant_ordering = False
@@ -219,7 +219,7 @@ embed()
 sys.exit()
 #TOOD: this is a big one, for 12 products the resp is at token limit befor summarization. Less columns are required for this model,
 # or fillding them in a smarter way, like repeat less known values (currency dates, or ask for less evidence)
-anticache_version = "suez_big_token"
+anticache_version = "suez_no_total_ab"
 df_cpcg = get_response_df(client_oai, messages_cpcg, financial_tools)
 
 validate_columns(df_cpcg, col_order)

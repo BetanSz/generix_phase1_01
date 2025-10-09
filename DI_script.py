@@ -65,7 +65,7 @@ def slugify_path(p: str, max_len=200) -> str:
 
 #from azure.ai.documentintelligence.models import ContentFormat #not working
 
-docs = []
+
 MAX_EMBED_CHARS = 6000  # simple guard to avoid very long inputs
 MAX_EMBED_CHARS = 6000  # simple guard to avoid very long inputs
 
@@ -81,14 +81,32 @@ print("len(pdfs_all):", len(pdfs_all))
 #pdfs_company = [pdf for pdf in pdfs_all if "suez" in pdf]
 #pdfs_company = [pdf for pdf in pdfs_all if "carter" in pdf]
 pdfs_company = [pdf for pdf in pdfs_all if "hach" in pdf]
-print(pdfs_company)
+pdfs_company = [pdf for pdf in pdfs_all if "mason" in pdf]
+pdfs_company = [pdf for pdf in pdfs_all if "fr_mes" in pdf.lower()]
+pdfs_company = [pdf for pdf in pdfs_all if "anagra" in pdf.lower()]
+pdfs_company = [pdf for pdf in pdfs_all if "kueh" in pdf.lower()]
+pdfs_company = [pdf for pdf in pdfs_all if "id_log" in pdf.lower()]
+pdfs_company = [pdf for pdf in pdfs_all if "shenker" in pdf.lower()]
+pdfs_company = [pdf for pdf in pdfs_all if "robot" in pdf.lower()]
+pdfs_company = [pdf for pdf in pdfs_all if "icko" in pdf.lower()]
+pdfs_company = [pdf for pdf in pdfs_all if "combrone" in pdf.lower()]
+pdfs_company = [pdf for pdf in pdfs_all if "invicta" in pdf.lower()]
+pdfs_company = [pdf for pdf in pdfs_all if "coca" in pdf.lower()]
+pdfs_company = [pdf for pdf in pdfs_all if "psa" in pdf.lower()]
+pdfs_company = [pdf for pdf in pdfs_all if "ricard" in pdf.lower()]
+pdfs_company = [pdf for pdf in pdfs_all if "watch" in pdf.lower()]
+pdfs_company = [pdf for pdf in pdfs_all if "navil" in pdf.lower()]
+pdfs_company = [pdf for pdf in pdfs_all if "serh" in pdf.lower()]
+pdfs_company = [pdf for pdf in pdfs_all if "sicame" in pdf.lower()]
+for pdf in pdfs_company:
+    print(pdf)
 print("len(pdfs_company) = ", len(pdfs_company))
 #pdfs = [pdf for pdf in pdfs if "Old contracts" in pdf]
 embed()
 sys.exit()
 analyse_doc_model = "prebuilt-read"
 analyse_doc_model = "prebuilt-layout"
-
+docs = []
 for i, pdf_name in enumerate(pdfs_company, start=1):
     print(f"processing....{i}/{len(pdfs_company)}", pdf_name)
     #breakpoint()
