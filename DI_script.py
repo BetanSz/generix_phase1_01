@@ -73,14 +73,14 @@ MAX_EMBED_CHARS = 6000  # simple guard to avoid very long inputs
 pdfs_all = [b.name for b in container.list_blobs() if b.name.lower().endswith(".pdf")]
 print("len(pdfs_all):", len(pdfs_all))
 
-
 #pdfs=['M/caloteries/b/Calottiers 201706 058931.pdf']
 #pdfs = [pdf for pdf in pdfs if "New contracts" in pdf]
 #pdfs = [pdf for pdf in pdfs if "CULTURA" in pdf]
 #pdfs_company = [pdf for pdf in pdfs_all if "RENAULT" in pdf or "RCI F" in pdf]
 #pdfs_company = [pdf for pdf in pdfs_all if "edenred" in pdf]
 #pdfs_company = [pdf for pdf in pdfs_all if "suez" in pdf]
-pdfs_company = [pdf for pdf in pdfs_all if "carter" in pdf]
+#pdfs_company = [pdf for pdf in pdfs_all if "carter" in pdf]
+pdfs_company = [pdf for pdf in pdfs_all if "hach" in pdf]
 print(pdfs_company)
 print("len(pdfs_company) = ", len(pdfs_company))
 #pdfs = [pdf for pdf in pdfs if "Old contracts" in pdf]
@@ -136,7 +136,7 @@ layout_price_page = 8.626/1000
 doc_pages = [doc["page_count"] for doc in docs]
 doc_mean = sum(doc_pages)/len(doc_pages)
 print("mean pages per contract = ", doc_mean)
-print("price [single document, 10000X]", layout_price_page*doc_mean, layout_price_page*10000*doc_mean)
+print("price [single document, 2000X]", layout_price_page*doc_mean, layout_price_page*2000*doc_mean)
 
 out_dir = Path(r"C:\Users\EstebanSzames\OneDrive - CELLENZA\Bureau\Generix\generix_phase1_01\doc_digitalized_sample")
 out_dir.mkdir(parents=True, exist_ok=True)
