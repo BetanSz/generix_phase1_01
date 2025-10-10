@@ -505,3 +505,33 @@ def build_message_cgcp(content_cadre_str, content_sous_str, user_question, finan
         },
     ]
     return messages_cpcg
+
+def build_message_avenant(avenant_str, avenant_question, financial_prompt):
+    content_av = "=== DOC: AVENANT — type=avenant ===\n" + avenant_str
+    messages_av = [
+        {"role": "system", "content": financial_prompt},
+        {
+            "role": "user",
+            "content": f"DOCUMENT CONTENT:\n\n{content_av}\n\nTASK:\n{avenant_question}",
+        },
+    ]
+    return messages_av
+
+def rectify_df(df_cpcg, col_order):
+    df_cpcg=df_cpcg.copy()
+    validate_columns(df_cpcg, col_order)
+    df_cpcg = df_cpcg.fillna("null")
+    df_cpcg = df_cpcg[col_order]
+    print("df_cpcg shape = ", df_cpcg.shape)
+    return df_cpcg
+
+def concat_avenant_df(df_av_list):
+    df_av_all = pd.concat(df_av_list)
+    df_av_all = df_av_all.sort_values("avenant_number")
+    print("df_av_all shape = ", df_av_all.shape)
+    print(
+        "AV number [len(pdfs), unique number in df]",
+        len(df_av_list),
+        df_av_all["avenant_number"].nunique(),
+    )
+    return df_av_all

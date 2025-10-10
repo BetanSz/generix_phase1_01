@@ -121,7 +121,8 @@ do not overwrite CP rows, even if the product is the same. Do not omit unchanged
 ## Edge cases to consider:
 - If reconduction_tacite=True, ignore duration/prorata and set date_end_of_contract="2099-12-31". In evidence_date_end_of_contract, cite the reconduction clause.
 - If the "Niveau de Service (SLA)" is present, add it as an additional product including the code. Most details about this product will remain empty.
-  Common cases of SLA agreement are "SLA GIS Standard" having the code: 04311 or "SLA GIS Premium" having the code: 04317.
+  Common cases of SLA agreement are "SLA GIS Standard" having the code: 04311 or "SLA GIS Premium" having the code: 04317. The type oF SLA agreement (Standard,
+  Premium, etc) must be indicated in the product name if possible. It's usually found in the page of the SLA specifications.
 - Specially in AVENANT parts of the contract, The phrase “d'un montant forfaitaire mensuel total de : X €” is not a recap when tied to a family/process;
  it's the price of that product line.
 - If the contract has no CG, set signature_date_cg = null (do not mirror CP signature into CG).
