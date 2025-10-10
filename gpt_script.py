@@ -42,6 +42,7 @@ company_name = "mason" # short contracts are not workign very well
 #company_name = "fr_mes"
 #company_name = "id_log" # difficult contract
 #company_name = "invicta"
+company_name = "coca"
 
 docs = get_docs(company_name, cosmos_digitaliezd)
 content_cadre, content_sous, content_avenant = get_cpcgav(docs, safe=safe_flag, avenant_ordering=avenant_ordering)
@@ -55,7 +56,7 @@ embed()
 sys.exit()
 #TOOD: this is a big one, for 12 products the resp is at token limit befor summarization. Less columns are required for this model,
 # or fillding them in a smarter way, like repeat less known values (currency dates, or ask for less evidence)
-anticache_version = company_name + "_05"
+anticache_version = company_name + "_01"
 df_cpcg = get_response_df(client_oai, messages_cpcg, financial_tools)
 
 validate_columns(df_cpcg, col_order)
