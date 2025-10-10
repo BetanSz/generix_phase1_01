@@ -9,6 +9,7 @@ from datetime import datetime
 from unidecode import unidecode
 from datetime import date
 import pandas as pd
+import numpy as np
 
 annex_prompt = """
 Your main objective is to find the line where the Annex of the document starts.
@@ -350,3 +351,157 @@ def calculate_total_abb(df):
     df.insert(i, "total_abbonement_mensuel_calc", s)
     df = df.drop(columns=["loyer_m", "loyer_f"])
     return df
+
+def loyer2null(df, safe_flag=True):
+    df =df.copy()
+    if safe_flag==True:
+        if sorted(df["one_shot_service"].unique())!=sorted([False,  True]) or sorted(df["is_volume_product"].unique())!=sorted([False,  True]):
+            print("WARNING unsafe loyer2null call. returning original df")
+            return df
+    one_shot_mask = df['one_shot_service'].astype(bool)==True
+    not_volume_mask = df['is_volume_product'].astype(bool)==False
+    no_loyer_mask = one_shot_mask & not_volume_mask
+    # (a) If price_unitaire is NaN and loyer has a value, move loyer into price_unitaire
+
+    df["price_unitaire_f"] = pd.to_numeric(df["price_unitaire"].replace({"null": np.nan}), errors="coerce")
+    df["price_unitaire_f"].values
+
+    move_mask = one_shot_mask & df['price_unitaire_f'].isna() & df['loyer'].notna()
+    print("moving badly classified loyer to price... number of affected rows = ", sum(move_mask))
+    df.loc[move_mask, 'price_unitaire'] = df.loc[move_mask, 'loyer']
+
+    # (b) For ALL one-shot rows, null out recurring/cadence fields
+    cols_to_null = [
+        'loyer', 'loyer_facturation', 'loyer_annuele',
+        'billing_frequency', 'loyer_periodicity'
+    ]
+    for c in cols_to_null:
+        if c in df.columns:
+            df.loc[no_loyer_mask, c] = np.nan
+    df =df.drop(columns=["price_unitaire_f"])
+    return df
+
+def get_cpcgav(docs, verbose=True, safe=True, avenant_ordering=True):
+    # TODO: This is getting very fragile...
+    # TODO: this ordering options, without llms seems fine actually.
+    cp_identifiers = ["SOUSCRIPTION", "CP",  "LICENCE", "CONTRAT-SAAS", "CONTRAT-PRESTATIONS"] #suez is a special case due to bad id
+    cg_identifiers = ["CADRE", "CG"]
+    content_cadre = [
+        doc.get("content", "")
+        for doc in docs
+        if  any([c_flag.lower() in doc["id"].lower() for c_flag in cg_identifiers])
+                and "avenant" not in doc["id"].lower()
+    ]
+    content_sous = [
+        doc.get("content", "")
+        for doc in docs
+        if any([c_flag.lower() in doc["id"].lower() for c_flag in cp_identifiers])
+               #and "avenant" not in doc["id"].lower()
+    ]
+    if safe:
+        assert len(content_cadre) >= 1 and len(content_sous) >= 1
+    if avenant_ordering:
+        avenant_id_content_list = [
+            (doc.get("id", ""), doc.get("content", ""))
+            for doc in docs
+            if "AVENANT-".lower() in doc["id"].lower()
+        ]
+        # OBS: tuple structre (id, content, on=irdering on file name, oc=ordering of file content)
+        avenant_id_content_index_list = [
+            (
+                id,
+                content,
+                parse_date_from_filename(id),
+                parse_date_from_text_fr(content),
+            )
+            for id, content in avenant_id_content_list
+        ]
+        sorting_key = 2  # parse_date_from_filename(id) -> from filname
+        sorting_key = 3  # parse_date_from_text_fr(content) -> from content
+        avenant_id_content_index_list = sorted(
+            avenant_id_content_index_list, key=lambda x: x[sorting_key]
+        )
+        if verbose:
+            print("Avenant ordering:")
+            for id, _, on, oc in avenant_id_content_index_list:
+                print(on, oc)
+        content_avenant = [
+            content for _, content, _, _ in avenant_id_content_index_list
+        ]
+    else:
+        content_avenant = [
+            doc.get("content", "")
+            for doc in docs
+            if "AVENANT-".lower() in doc["id"].lower()
+        ]
+    if verbose:
+        print(
+            "Amount documents [CG,CP,AV]=",
+            len(content_cadre),
+            len(content_sous),
+            len(content_avenant),
+        )
+    return content_cadre, content_sous, content_avenant
+
+
+def process_cgcp(client_oai, content_cadre, content_sous, tools_annex, annex_prompt, do_truncation, safe_flag=False, verbose=True):
+    if len(content_cadre) == 1 and len(content_sous) == 1:
+        content_cadre_str = content_cadre[0]
+        content_sous_str = gpt_truncation(
+            content_sous[0], tools_annex, annex_prompt, do_truncation, client_oai
+        )
+    elif len(content_cadre) == 1 and len(content_sous) >= 1:
+        content_cadre_str = content_cadre[0]
+        content_sous_str = "\n".join(
+            gpt_truncation(t, tools_annex, annex_prompt, do_truncation, client_oai)
+            for t in content_sous
+        )
+    elif safe_flag==False: #no expectation of amount of docs in cp or cg
+        content_cadre_str = "\n".join(content_cadre)
+        content_sous_str = "\n".join(content_sous)
+    else:
+        raise ValueError("Unexpected lengths.")
+    if verbose:
+        print("len [str] content [cg,cp]=", len(content_cadre_str), len(content_sous_str))
+    return content_cadre_str, content_sous_str
+
+
+def get_docs(company_name, cosmos_digitaliezd, exclude_flag=True, verbose=True):
+    doc_ids = list(
+        cosmos_digitaliezd.query_items(
+            query="SELECT VALUE c.id FROM c WHERE CONTAINS(c.id, @kw, true) AND ENDSWITH(c.id, '.pdf')",
+            parameters=[{"name": "@kw", "value": company_name}],
+            enable_cross_partition_query=True,
+        )
+    )
+    if verbose:
+        print("numbers of docs original = ", len(doc_ids))
+    if exclude_flag:
+        doc_ids = [doc for doc in doc_ids if "-ASP-" not in doc]
+    if verbose:
+        print("numbers of docs after exclusion = ", len(doc_ids))
+    docs = [cosmos_digitaliezd.read_item(item=i, partition_key=i) for i in doc_ids]
+    if verbose:
+        print("All recuperated docs from company name:")
+        for doc in docs:
+            print(
+                doc["id"], doc.get("blob_path"), doc.get("page_count")
+            )
+    return docs
+
+def build_message_cgcp(content_cadre_str, content_sous_str, user_question, financial_prompt):
+    content_cpcg = (
+        "=== DOC: CADRE — type=cadre ===\n"
+        + content_cadre_str.strip()
+        + "\n\n"
+        + "=== DOC: SOUSCRIPTION — type=souscription ===\n"
+        + content_sous_str.strip()
+    )
+    messages_cpcg = [
+        {"role": "system", "content": financial_prompt},
+        {
+            "role": "user",
+            "content": f"DOCUMENT CONTENT:\n\n{content_cpcg}\n\nTASK:\n{user_question}",
+        },
+    ]
+    return messages_cpcg

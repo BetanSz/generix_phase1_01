@@ -11,20 +11,17 @@ financial_prompt = """
 # Main Objectives:
 - Your main objective is to identify the products present in the contract and retrieve the items defined in the Scope to extract. This is mainly financial
 information about the products, and other aspects of the contract.
-- Products & rows: Create one row per product as found in the CP (tables, bullets, or callouts) or AVENANTS.
+- Products & rows: Create one row for each product as found in the CP (tables, bullets, or callouts) or AVENANTS.
 Include items marked Inclus/Gratuit/Compris/0 with is_included=true and price_unitaire=null (or 0 only if literally “0”).
 - Do not create rows for totals/recaps; only for underlying items (i.e. products) that usually carry their own price.
-- Create a product row for each product present in the avenant.
-- Include products even if free/included. For example the product "Niveau de service (SLA)" or simply SLA tends to be included without at price, and
-must olways be present in the output if retained by the client.
-- Product description or code in the avenant may repeat a product already present in the CP. Keep all of them, as to preserve the chronological history
-of the contract product changes in time. 
-- If a value is not present or unclear, set to null. Do not guess.
+- Include all products, even if free/included. For example the product "Niveau de service (SLA)" or simply SLA tends to be included without a price, and
+must always be present in the output if retained by the client.
+- Product description or code in the avenant may repeat a product already present in the CP. Keep all of them.
 - Keep original language of quotes (FR/EN). Output currency as ISO (EUR, USD, GBP, CHF, CAD, AUD, JPY). No conversions.
 - Prefer capturing a product row even if details are missing. when unsure about a field, set that field to null (do not invent values).
 - Order the rows chronologically using the signature date: first the products as defined in the CP and then the products as defined in the avenant.
-- Use null when a field is not applicable by design for that row (e.g., for a one-shot).
-Use the string "unknown" when the field should exist in this contract (typical CP/AV fields) but is not explicitly stated or cannot be located with confidence.
+- Do not summarize or synthesize umbrella rows. Output one row per priced line when the document lists repeated lines that each carry a price/PU/quantity/loyer
+ (e.g., by date range, semester, year, phase).
 
 ## Document structure and precedence:
 - One CG = Conditions Générales (cadre): general default contract conditions.
@@ -33,32 +30,40 @@ Use the string "unknown" when the field should exist in this contract (typical C
 - If CP specifies a value (or any contract condition) it overrides what was defined in the CG.
 - If CP is silent, fall back to CG.
 - Treat each product present in the AVENANT section as separate products, even if they repeat with respect to the CP. 
-- Older contracts are before 2023.
-- In newer contracts products are usually found in “Abonnement …”, “Services associés/Options”, "Base de calcul du montant de l'Abonnement".
+-In newer contracts (signature date after 2023) products are usually found in “Abonnement …”, “Services associés/Options”, "Base de calcul du montant de l'Abonnement".
   Sometimes it can also be found in an annex such as "ANNEXE 5 : Conditions Financières".
-- In older contracts  products are usually found in "Prix, modalites de facturation et de reglement".
+- In older contracts (signature date before 2023) products are usually found in "Prix, modalites de facturation et de reglement". Old contracts tend to have reconduction tacite.
+Older contracts tend to not have the product_code.
 - In avenants products are usually found under "2 ARTICLE 5.2 - ABONNEMENT" or "Modifications de l'article 5.2 des Conditions Particulières du Contrat".
 
 ## How to identify products & prices:
-- One row = one priced block. A "block" may be a table row, a bullet/list item, or a short paragraph (≤3 lines) where a label is clearly tied to a
- nearby amount (same line or within the next line). Free-text blocks count if the pairing is clear. Create a product row whenever a description/label
-   is directly tied to a price in the same line/cell/box or the immediately following short line.
-- Valid blocks can be: table rows, bullet/paragraph lines with a nearby price, or bordered callouts. Products may also appear in the contract text in
-natural language.
+- One row = one priced block. A "block" may be the items in a table row, a bullet/list item, bordered callouts, or a short paragraph (≤3 lines) where a label is clearly tied to a
+ nearby amount (same line or within the next line). Free-text blocks (natural language) are also valid if the pairing is clear. Create a product row whenever
+a description/label is directly tied to a price in the same line/cell/box or the immediately following short line.
+If a table in the finantial conditions has some of these: Code, Wording, Quantity, Price per unit Monthly, rent; it's probably a product table.
+Business-process tables by country (e.g., “GIS COUNTRY …”) if they have a product description and loyer, rent or amount should be included.
 - Do not make rows for “Total / Sous-total / Récapitulatif / recaps /Total abonnement /Total abonnement aux Process métier …”. Only record the underlying 
 items that carry their own price or are included. Do not aggregate across blocks: one row per priced block. If a block shows only a total,
- do not produce a row and use the child items that carry their own prices.
+ do not produce a row, use the child items that carry their own prices.
+- A product row may have missing product_code.
 - Price extraction. Take the closest amount to the block. Set tax_basis only if HT/TTC is shown next to that amount.
-- Periodicity. Set loyer_periodicity from the local wording next to the price (e.g., mensuel/le, trimestriel/le, annuel/le).
- If not explicit on that block, leave null.
-- One-time vs recurring. If the block says OTC / mise en œuvre / one-time / setup / frais initiaux or is a setup/milestone/OTC (e.g., “On order”,
- “After Design Phase”, “At delivery of the configuration”, “At the end of UAT”, “Production start-up”, “2 months after go live”,
-  “Kick-off”, “Hypercare”), then: set one_shot_service=true. Put the amount in price_unitaire (NOT in loyer). Set loyer, loyer_facturation, loyer_annuele, 
-  loyer_periodicity, billing_frequency. Set is_volume_product=false. Otherwise, treat as recurring.
-- Priority for one-shots: when one_shot_service=true, the closest amount MUST be captured in price_unitaire.
-  Do not populate loyer or any loyer_* fields for one-shots.
-- Usage/volume cases. Only recurring, consumption-based blocks can be volume products. One-shot rows can NEVER be
-  is_volume_product=true. If wording mentions volume / unité d'œuvre / palier / S1/S2 / dégressif / utilisateur
+- One-time vs recurring cases:
+  -- **One-time** : Non-recurring or non-priced deliveries:
+  --- Trigger when the block is any of: concession/licence/droit d'usage, OTC / mise en œuvre / setup / milestone 
+  (e.g., “On order”, “After Design Phase”, “At delivery…”, “End of UAT”, “Production start-up”, “Kick-off”, “Hypercare”),
+  or when the price cell shows Inclus/Gratuit/Compris/0.
+  --- Set one_shot_service=true for paid-once items; is_included=true for free/included items.
+  --- price_unitaire = closest amount only if paid-once; if is_included=true → price_unitaire=null.
+  --- Do not populate any loyer* fields for this case. Set loyer=null, loyer_facturation=null, loyer_annuele=null,
+  loyer_periodicity=null, billing_frequency=null, is_volume_product=false, term_mode=null.
+  --- If a loyer/cadence appears near a one-shot, keep loyer* = null and briefly note the contradiction in evidence_price.
+  -- **Recurring**:
+  --- Set one_shot_service=false, is_included=false.
+  --- billing_frequency from explicit CP/CG billing terms (else null).
+  --- Only recurring, consumption-based blocks can be volume products (is_volume_product=True, is_included=False).
+  --- Recurring products with is_volume_product=False have a flat fee wich must be put in loyer, with the corresponding periodicity in loyer_periodicity.
+  --- If no cadence on or near the block → loyer_periodicity="unknown" (do not infer).
+- If wording mentions volume / unité d'œuvre / palier / S1/S2 / dégressif / utilisateur / 
   supplémentaire, fill usage_* fields and summarize mechanics in usage_notes (≤100 chars).
 - Naming. product_name = the shortest clear label/heading for the block. Put any explicit numeric code on that block in product_code; otherwise null.
 - Multi-line features. If many bullets describe one thing and one price is given, create one row.  If multiple prices are listed under distinct
@@ -69,8 +74,26 @@ items that carry their own price or are included. Do not aggregate across blocks
 this IS the price of that product line.
 - If a cell contains several amounts (e.g., “1 550 € HT 200 € HT 150 € HT”), map each amount to the closest preceding labeled item in that block
  (e.g., WMS → 1 550, KPI → 200, Cloisonnement → 150) and emit one row per amount.
+ - REMISE COMMERCIALE or oatherwsie a discout with a negative amount must be included as well.
 
-## How to identify overconsumption (surconsommation)
+ ## How to identify Volume products (recurring cases having is_volume_product=True):
+- Capture each volume product in a separate row with periodized commitments (dates, date ranges, semesters, years) with PU and/or loyer and/or quantity,
+ EMIT ONE ROW PER LINE/PERIOD. For example if the CP or AVENANT shows a “Pricing mensuel volumes”
+ table with Year and S1/S2 columns,  EMIT ONE ROW FOR EVERY PRICED SEMESTER CELL (e.g., 2015 S1, 2015 S2, 2016 S1, 2016 S2…). Do NOT aggregate these.
+ **Save as product row every one of these entires**. If for example the table has 5 years and 2 prices per yer, there should be 5 times 2 = 10 rows.
+- product_name: "Abonnement volume <Famille> — <Année> <S1/S2>".
+- quantity: the numeric commitment as stated (lines, factures, bills) which should be provided with a given periodicity. For example,
+  “Nombre de lignes de préparation expédiées par an” ⇒ quantity (digits only, no spaces) and quantity_periodicity=Annuelle.
+  Keep it as an **integer**. Do **not** prorate by S1/S2 percentages (30%/70%). Set quantity_periodicity according to the information on
+  the table, for example Annuelle.
+- Loyer can for example be "Pricing mensual volumes", since the table states an explicit monthly price for that commitment period.
+- Many times, the SLA agreement (which must be included in the output) is found in the volume description, for example: 
+"Le montant de l'Abonnement au Volume d'activité est calculé en fonction du nombre mensuel de factures entrantes et sortantes et du Niveau de Services (SLA)"
+- If there is a projection/schedule/commitment table (e.g., “Projection financière”, “Échéancier”, lines like “du 01/03/2026 au 31/08/2026” with
+ Quantité mensuelle and Loyer), treat each line as a concrete priced row (one row per line).
+
+## How to identify overconsumption (or surconsommation):
+- Only present for products having is_volume_product=True.
 - If the nearby text mentions any of: dépassement, complément de consommation, surconsommation, 
 au-delà de l'engagement, utilisateur supplémentaire / seat additionnel, palier, unité d'œuvre, S1/S2, dégressif.
 - If the rule has no numeric price (e.g., “unité d'œuvre surcotée de 15% vs palier”):
@@ -82,62 +105,37 @@ au-delà de l'engagement, utilisateur supplémentaire / seat additionnel, palier
     - usage_overconsumption_price = number
     - usage_overconsumption_periodicity = cadence in the same block (e.g., Mensuelle)
     - usage_term_mode if the block states it; else null
-    - usage_notes = short label, e.g. "prix par utilisateur supplémentaire".
+    - usage_notes = short label, e.g. "prix par utilisateur supplémentaire" or "utilisateur supplémentaire 10 €/mois".
 
 ## How to handle avenants:
 - Avenants are found after the CP. Each one is defined with the tags: "=== DOC: AVENANT — type=avenant ===\n".
   Each of these must be treated independently. Sometimes in the document they may be referred to as "amendment".
 - Each avenant creates additional product rows in sequential order, as defined by the signature date of the avenant;
 do not overwrite CP rows, even if the product is the same. Do not omit unchanged products already present in the CP.
-- Row creation rule for amendments: create rows ONLY from blocks that pair a concrete label with a numeric price
-  (table row, bullet, or short paragraph). Ignore methodology prose (phases, governance, calendars, UAT criteria)
-  when no price is in the same block.
+- The same rules for detecting products, volume and overconsumption in the CP apply to avenants.
 - If an avenant changes an already present product in any way, reflect the change in evidence_avenant following evidence guidelines.
-- Order outputs by signature date (CP rows should come first, then avenants chronologically using their signature date).
-- Implementation / milestone fees: treat as one-shot lines.
-  one_shot_service=true; price_unitaire = the total for that item; loyer/loyer_* and billing_frequency = null.
-  Set service_start_date if the block explicitly says start at signature/Go-Live/etc. Capture payment_terms/methods if stated.
 - New perimeter / affiliate priced in the amendment: emit a separate one-shot row for that perimeter.
-- Price grids shown without a chosen tier/commitment are descriptive: do NOT create rows. Create volume rows only
-  when a concrete commitment (quantity × unit price) with a cadence is stated.
 - Restated SLA without price (is_included=true; product_code if present; price_unitaire=null).
-- Overconsumption terms in amendments: if a unit price is stated, fill usage_overconsumption_price and its periodicity (if given); do not infer a base fee.
-
-
-## How to handle Volume products (table decomposition):
-- If the CP or AVENANT shows a “Pricing mensuel volumes” table with Year and S1/S2 columns,
-- EMIT ONE ROW PER PRICED SEMESTER CELL (e.g., 2015 S1, 2015 S2, 2016 S1, 2016 S2…).
-- product_name: "Abonnement volume <Famille> — <Année> <S1/S2>".
-- quantity: the numeric commitment as stated (lines, factures, bills) which is provided with a given periodicty. For example,
-  “Nombre de lignes de préparation expédiées par an” ⇒ quantity (digits only, no spaces) and quantity_periodicity=Annuelle.
-- quantity: use the numeric commitment as printed (digits only, no spaces) and keep it as an
-  **integer**. Do **not** prorate by S1/S2 percentages (30%/70%). Set quantity_periodicity according to the information on
-  the table, for example Annuelle.
-- is_volume_product = true (because it's usage-based)
-- Loyer can for exmaple be "Pricing mensual volumes".
-- since the table states an explicit monthly price for that commitment period.
-- Do NOT aggregate these; do NOT replace them with one generic “volume” row.
-- Many times, the SLA agreement (wich must be included in the output) is found in the volumne description, for example: 
-"Le montant de l'Abonnement au Volume d'activité est calculé en fonction du nombre mensuel de factures entrantes et sortantes et du Niveau de Services (SLA)"
+- Do NOT deduplicate by product Code or wording; keep all the product lines.
 
 ## Edge cases to consider:
 - If reconduction_tacite=True, ignore duration/prorata and set date_end_of_contract="2099-12-31". In evidence_date_end_of_contract, cite the reconduction clause.
 - If the "Niveau de Service (SLA)" is present, add it as an additional product including the code. Most details about this product will remain empty.
-  Common cases of SLA agreement is "SLA GIS Standard" having the code: 04311 or "SLA GIS Premium" having the code: 04317.
+  Common cases of SLA agreement are "SLA GIS Standard" having the code: 04311 or "SLA GIS Premium" having the code: 04317.
 - Specially in AVENANT parts of the contract, The phrase “d'un montant forfaitaire mensuel total de : X €” is not a recap when tied to a family/process;
  it's the price of that product line.
 - If the contract has no CG, set signature_date_cg = null (do not mirror CP signature into CG).
+- If product has is_included=True and/or one_shot_service=True then set to null: reval_method, reval_rate_per, reval_formula, reval_compute_when,
+ reval_apply_when, reval_apply_from, reval_source, loyer_facturation, loyer_annuele, loyer_periodicity.
  
-## Columns to emit (tool output schema).
-- Emit one JSON object per product row that maps 1:1 to the record_products tool parameters below.
-- Do not invent fields or keys. For each key, follow the definition exactly; if a value is not explicit on the relevant block, set null. 
-- Duplicate affair-level fields on every row, many coming from the CG.
-
+The following section contains the description of the fields that populate the json output:
+ 
 ## Contract / affair (repeat on every product row)
 - company_name (string) — Client legal name from CP “Raison sociale du Client”. If absent, fall back to CG; else null.
 - numero_de_contrat (string|null)- The contract string, which usually appear the the beginning of the file under CONTRAT CADRE DE REFERENCE or OPPORTUNITE.
 The contract string is usually composed of two numbers like "2014100-39808", this format must be kept.
-- reconduction_tacite (bool|null) - Find if the contract has tacite or automatic reconduction, meaning it will renew itself unless stipulated otherwise.
+- reconduction_tacite (bool|null) - Set to true only if the contract explicitly has reconduction tacite, renouvellement automatique, automatic 
+reconduction, or similar; meaning it will renew itself unless stipulated otherwise.
 This information is by default in the CG, and sometimes it's changed in the CP. Answer True or False.
 - devise_de_facturation (enum: EUR, USD, GBP, CHF, CAD, AUD, JPY) — From CP “Devise de facturation”; fall back to CG.
 - tax_basis (HT/TTC|null) — If explicitly shown near prices/totals. Never infer.
@@ -145,53 +143,50 @@ This information is by default in the CG, and sometimes it's changed in the CP. 
 - signature_date_cp (date|null) — Signature date of CP, if present. If an AVENANT date is present instead, put this to null.
 - signature_date_av (date|null) — Signature date of AVENANT, if present.
 - avenant_number (numeric|null) - If this part of the document is an AVENANT, put the number in this field.
-- service_start_date (string date|null) — Start date of services if a concrete date is written. Do not invent. For example it may be "prend effet à la 
-date de signature.". So the start date should be the signature of the document. This is usually the case for AVENANTS.
-- debut_facturation (string|null) — Write a specific billing start date if available. If the start is an event (e.g.,procede verbal: PV VABF, GO), put that
- instead. In a given contract, different products may have different billing start dates.
-- duree_de_service (number or string|null) — Numeric duration in months or "indeterminé". If possible read the CP “Durée des Services …” line,
+- service_start_date (string date|null) — Start date of services if a concrete date is written (Do not invent):
+-- If the block states “à la signature” set to signature_date_cp (or signature_date_av within an AVENANT).
+-- If the block prints another explicit start/effective date, use that.
+-- Otherwise null. Never copy dates from other blocks (e.g., do not copy a maintenance start into a licence row).
+- debut_facturation (string|null) — Write a specific billing start date if available. If the start is an event (e.g.,procede verbal: PV VABF, GO),
+ put that instead. In a given contract, different products may have different billing start dates.
+- duree_de_service (number or string|null) — Numeric duration in months or "indeterminé" if reconduction_tacite=True. If possible read the CP “Durée des Services …” line,
 if absent in CP, fallback to CG. Any additional remainder such as (e.g., “+ prorata de la période en cours”) put into duree_de_service_notes. 
-This value is "indeterminé" if the contract is of type reconduction tacite, meaning it will automatically renew itself.
-This information is usually in the CG, old contracts tend to have reconduction tacite.
 - duree_de_service_notes (string|null) — Any non-numeric tail near duree_de_service data (e.g., "+ prorata de la période en cours").
-- date_end_of_contract (string|null) - This field represent the date at which the contract ends for evry product. The possible cases are:
-    -- is null for every row that has one_shot_service=True (for example for OTC).
+- date_end_of_contract (string|null) - This field represents the date at which the contract ends for every product. The possible cases are:
+    -- is null for every row that has one_shot_service=True (for example for OTC) or is_included=true.
     -- If reconduction_tacite=True (global contract level property), then the contract is of duree "indetermine", there is no end to the contract.
     In this case put "31 dec 2099".
-    -- If reconduction_tacite=False then this field is a derived quantity. It's the signature date + duree_de_service + prorata. The signature date
+    -- If reconduction_tacite=False then this field is a derived quantity. It must be calculated as the signature date + duree_de_service + prorata. The signature date
       is a date always present in the contract. duree_de_service is usually in months. prorata must be calculated as the difference in month between
       the signature date and the end of that year, in months. Therefore, to calculate date_end_of_contract sum to the signature date the months of 
       duree_de_service and prorata (if present). However, if duree_de_service is not available set it to "unknown".
 - term_mode (À échoir, Échu or null) — Billing mode for base subscription, possibly present in the “Terme” column.
-For overconsumption lines, set overconsumption_term_mode accordingly.
+For overconsumption lines, set overconsumption_term_mode accordingly. Set to null for one_shot_service=True and/or is_included=True.
 
 ## Product identification
-- product_name (string, required) — Line label (“Libellé”) in CP pricing sections.
+- product_name (string, required) — Line label (“Libellé”) in CP pricing sections. Do not invent synthesized labels if the document instead lists multiple dated lines.
+Use the original per-line label
 - product_code (string|null) — “Code” in the same row if present. Put only the code number, any additional description belongs to product_name.
-Older contracts tend to not have the product code.
 - is_included (boolean, required) — True when the row shows Inclus/Gratuit/Compris/0, meaning this is a product or service which is being delivered,
 but without a price. In this case set price_unitaire=null.
 - price_unitaire (number|null) — There are three possible cases:
-    -- General case, for a flat fee: Take the unitary price cell on the same row  if possible.
+    -- General case, for a flat fee: Take the unitary price cell on the same row if possible.
     -- If the cell is “Inclus/Gratuit/Compris/0”, set is_included=true and price_unitaire=null.
-    -- If is_volume_product=True, then price_unitaire must probably be computed
-    using the loyer and quantiy. However, both of this quantities must be expressed per month basis, which is not usually the case. Use
+    -- If is_volume_product=True, then price_unitaire must probably be computed using the loyer and quantity. However, both of this quantities must
+    be expressed per month basis, which is not usually the case. Use
     quantity_periodicity to normalize quantity to a single month and loyer_periodicity to normalize loyer to a single month. Having this values
-    then compute price_unitaire = loyer_{per month}/quantiy_{per month}. for example, if semestrial quantity and monthly loyer,
-    then quantiy_{per month} = quantity / 6. Compute price_unitaire per single unit of the stated quantity. Do not rebase to “per 100 / 1 000 / 10 000”
+    then compute price_unitaire = loyer_{per month}/quantity_{per month}. for example, if semestrial quantity and monthly loyer,
+    then quantity_{per month} = quantity / 6. Compute price_unitaire per single unit of the stated quantity. Do not rebase to “per 100 / 1 000 / 10 000”
     unless the contract explicitly says so (e.g., “€/1000 lignes”). Keep small decimals if needed.
 - quantity (number|null) — amount of units of each service, possibly coming from the “Quantité” column of the product table.
 It's usually an integer number (01, 02, ..) expressing the a amount of served items or for volume products values like 10000, 15000, 
 expressing amount of for example bills. If absent set to null.
-- quantity_periodicity (enum: Mensuelle|Trimestrielle|Semestrielle|Annuelle|Autre|null) — cadence of the quantity measure if explicitly stated
+- quantity_periodicity (enum: Mensuelle|Trimestrielle|Semestrielle|Annuelle|Unknown|null) — cadence of the quantity measure if explicitly stated
  (e.g., “par an” ⇒ Annuelle). Leave null if unstated.
 - is_volume_product (boolean, required) — true only if the row's base price itself is
-  defined by measured usage/tiers/paliers (volume d'activité, unités d'œuvre, S1/S2).
-  If the row is a flat recurring fee with separate overconsumption terms (e.g., base
-  200 €/mois + “utilisateur supplémentaire 10 €/mois”), set is_volume_product=false and
-  capture overconsumption in usage_*.
-- loyer (number|null) — Final price of the product for its own cadence (usually in the form of price_unitaire per quantity),
-  regardless of periodicity. Example: if the row states “10 000 € par an”, then loyer=10000 and loyer_periodicity=Annuelle (also set loyer_annuele=10000).
+  defined by measured usage/tiers/paliers. Use the rules found in "How to identify Volume products".
+- loyer (number|null) — Final recurring price of the product for its own cadence. Usually in the form of price_unitaire per quantity for a given periodicty.
+  Example: if the row states “10 000 € par an”, then loyer=10000 and loyer_periodicity=Annuelle (also set loyer_annuele=10000).
   If one_shot_service=True, then set this to null, since it's a one time payment.
 - loyer_facturation (number|null) — This is a calculated magnitude. Is the loyer at facturation time. For example if the loyer is mensuel and the
 facturation time is trimestriel, loyer_facturation = loyer * 3. Note that if the loyer is not mensuel then it's necessary to first obtain
@@ -207,17 +202,17 @@ If one_shot_service=True, then set this to null, since it's a one time payment.
 If cadence appears only in distant headers or elsewhere, leave null. Do not copy billing cadence here.
 If one_shot_service=True or is_included=True, then set this to null, since it's a one time payment.
 - one_shot_service (bool|null) — True if one shot product, paid only once, if explicitly listed. Otherwise False
-- bon_de_commande (bool|null) - If the product is of type bon commande. This is usualy commented in the contract text, referencing
+- bon_de_commande (bool|null) - If the product is of type bon commande. This is usually commented in the contract text, referencing
 specific products. Binary value (True/False).
 - bon_de_commande_code (string|null) - Code associated to the bon de commande, present near the bon de commande reference. For example "bon de commande
 201612 054696".
 
 ## Usage / surconsommation
 - usage_overconsumption_price (string|null) — Unit price for overconsumption only if shown, usually associated to volume products.
-- usage_overconsumption_periodicity (enum: Mensuelle|Trimestrielle|Semestrielle|Annuelle|Autre|null) — Frequency of overconsumption calculation 
+- usage_overconsumption_periodicity (enum: Mensuelle|Trimestrielle|Semestrielle|Annuelle|Unknown|null) — Frequency of overconsumption calculation 
 (how often surconsommation is computed), usually stated next to the overconsumption price.
 - usage_term_mode (string|null) — Set only when an explicit term mode is stated   for included/usage; otherwise null.
-It usually is "à terme échu" or simply "échu" since the client volume consumption cannot be known in advanced. Do not inherit the product billing term here.
+It usually is "à terme échu" or simply "échu" since the client volume consumption cannot be known in advance. Do not inherit the product billing term here.
 - overconsumption_term_mode (string|null) — Term mode specifically for overconsumption (often Échu). Only set if explicit.
 - usage_notes (string|null) — Notes about how usage/overconsumption is measured or charged (tiers/thresholds, proration, aggregation scope, carryover,
  rounding, exclusions, caps). Keep original language (FR/EN), ≤160 chars, strip line breaks/spaces, and don't repeat info already captured in structured fields.
@@ -266,13 +261,13 @@ product code, then the product description is similar), write a very short summa
 if the contract is signed 01/10/2015 the prorata is the amount of month until the end of the year, so prorata(signed=01/10/2015) = 2 months.
 - evidence_contract_errors (array of strings | null) — List of short flags about inconsistencies, conflicts, or cross-section mismatches
   detected in this contract (e.g., "Éditique 920€/mois in Annexe 3.4 vs 919€ elsewhere"). Keep each item ≤140 chars. Add the references where contradictions
-  or erros appear, including typos (minly in french). Consider also very clear and explicity conceptual erros within the contract.
+  or errors appear, including typos (minly in french). Consider also very clear and explicit conceptual errors within the contract.
   If none, set null. List source inconsistencies (e.g., a product shown with 920 €/mois in one annex and 919 € in another). Keep it short.
   You can summarize in this section. If something looks kind of strange you can mention it, even if it is not a full blown error.
 - For one_shot_service=True, evidence_price should quote the milestone/OTC label and its amount. There should be no loyer for this product: if evidence of
 loyer is found, explain this contradiction in evidence_price with references but keep it short.
 
-# Confidence scoring (0-1; null if the field is null)
+ # Confidence scoring (0-1; null if the field is null)
 - Base confidence value is 0.5. Apply this heuristic rules to determine final confidence value:
 - (+0.2) if an evidence_* quote from the same block is provided.
 - (+0.1) if the value is explicitly labeled (e.g., “mensuel”, “HT”).
@@ -290,18 +285,14 @@ loyer is found, explain this contradiction in evidence_price with references but
 
 # Output:
 - Always return final results by calling record_products with a complete payload. Do not write plain text.
+- Emit one JSON object per product row that maps 1:1 to the record_products.
 - When filling tool arguments, do not include raw newlines inside strings; replace internal newlines with spaces or “\n”.
 - Each row duplicates the shared affair-level fields (company, dates, currency, etc.) for that product.
+- Do not invent fields or keys. For each key, follow the definition exactly; if a value is not explicit on the relevant block, set null.
+- Periodized table sanity check. If a projection/schedule table shows N priced lines, the output must include ≥ N rows (ignoring totals). 
+If fewer would be output, do not collapse; output one row per line.
+- Table-line sanity check: if a table containing products shows N priced lines, output ≥ N rows (ignore only “Total …” recap lines).
 """
-
-
-# TODO: include this? what are their effect exactly
-"""
-Sanity checks:
-- For each AVENANT pricing table, count numeric amounts excluding the very last “Total abonnement …”. You must output at least that many product
- rows from the AVENANT.
- - Minimum rows sanity check. If the CP shows ≥2 priced blocks, you must output ≥2 rows (still ignore totals).
- """
 
 
 col_order = [
@@ -440,7 +431,6 @@ financial_tools = [
                                         "Mensuelle",
                                         "Trimestrielle",
                                         "Annuelle",
-                                        "Autre",
                                         "unknown",
                                     ],
                                 },
@@ -458,7 +448,6 @@ financial_tools = [
                                         "Mensuelle",
                                         "Trimestrielle",
                                         "Annuelle",
-                                        "Autre",
                                         "unknown",
                                     ],
                                 },
@@ -497,7 +486,6 @@ financial_tools = [
                                         "Mensuelle",
                                         "Trimestrielle",
                                         "Annuelle",
-                                        "Autre",
                                         "unknown",
                                     ],
                                 },
@@ -531,7 +519,7 @@ financial_tools = [
                                     "type": ["string", "null"]
                                 },
                                 "evidence_avenant": {"type": ["string", "null"]},
-                                # --- Confidences (0–1) ---
+                                 #--- Confidences (0–1) ---
                                 "confidence_price": {
                                     "type": ["number", "null"],
                                     "minimum": 0,
