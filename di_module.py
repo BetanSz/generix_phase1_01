@@ -1,7 +1,6 @@
 """ """
 
 import os, re
-from IPython import embed
 from azure.core.exceptions import HttpResponseError
 
 
@@ -17,7 +16,6 @@ def process_affair_document_intelligence(
     docs = upsert_cosmos_df(cosmos_digitaliezd, container, client_di, pdfs_company)
     print_price_estimations(docs)
     write_local_mk_files(docs, local_path)
-
 
 def parse_blob_path(path: str):
     """
@@ -54,7 +52,6 @@ def parse_blob_path(path: str):
         "affair_key": f"{letter}/{company}/{affair or 'root'}",
     }
 
-
 def slugify_path(p: str, max_len=200) -> str:
     s = p.strip()
     s = s.replace("/", "_").replace("\\", "_").replace("?", "_").replace("#", "_")
@@ -69,13 +66,11 @@ def read_pdfs(container):
     ]
     return pdfs_all
 
-
 def select_affair(pdfs_all, affair):
     if affair:
         return [pdf for pdf in pdfs_all if affair in pdf.lower()]
     else:
         return pdfs_all
-
 
 def upsert_cosmos_df(
     cosmos_digitaliezd,
@@ -118,7 +113,6 @@ def upsert_cosmos_df(
             print(e)
     return docs
 
-
 def print_price_estimations(docs):
     layout_price_page = 8.626 / 1000
     doc_pages = [doc["page_count"] for doc in docs]
@@ -129,7 +123,6 @@ def print_price_estimations(docs):
         layout_price_page * doc_mean,
         layout_price_page * 2000 * doc_mean,
     )
-
 
 def write_local_mk_files(docs, out_dir):
     out_dir.mkdir(parents=True, exist_ok=True)

@@ -18,10 +18,10 @@ def get_docs(company_name, cosmos_digitaliezd, exclude_flag=True, verbose=True):
     if verbose:
         print("numbers of docs after exclusion = ", len(doc_ids))
     docs = [cosmos_digitaliezd.read_item(item=i, partition_key=i) for i in doc_ids]
-    if verbose:
-        print("All recuperated docs from company name:")
-        for doc in docs:
-            print(doc["id"], doc.get("blob_path"), doc.get("page_count"))
+    #if verbose:
+    #    print("All recuperated docs from company name:")
+    #    for doc in docs:
+    #        print(doc["id"], doc.get("blob_path"), doc.get("page_count"))
     return docs
 
 
@@ -125,7 +125,7 @@ def print_resp_properties(resp):
     ) * OUTPUT_EUR_PER_1M
     print(f"Cost per doc: €{cost_eur:.2f}")
     print(f"Cost all: €{2000*cost_eur:.2f}")
-
+    
     print(
         "This should be tool_calls (if length then truncated output) =",
         getattr(resp.choices[0], "finish_reason", None),
