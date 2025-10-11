@@ -1,12 +1,3 @@
-import os, uuid
-import os, re
-import hashlib, datetime as dt
-from IPython import embed
-from pathlib import Path
-import textwrap
-import json
-
-
 financial_prompt = """
 # Main Objectives:
 - Your main objective is to identify the products present in the contract and retrieve the items defined in the Scope to extract. This is mainly financial

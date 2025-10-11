@@ -1,469 +1,6 @@
-import os, uuid
-import os, re
-import hashlib, datetime as dt
-from IPython import embed
-from pathlib import Path
-import textwrap
 import json
-from datetime import datetime
-from unidecode import unidecode
-from datetime import date
 import pandas as pd
 import numpy as np
-
-annex_prompt = """
-Your main objective is to find the line where the Annex of the document starts.
-Annex tend to start after the signature of the contract. Examples of signatures:
-
-le : 20/03/2015
-Pour GENERIX :
-Signé par :
-Marc BOULON
-Titre :
-Directeur des Opérations
-Supply Chain
-Signature :
-Lu et approuvé
-M
-Pour CULTURA - SOCULTUR SAS :
-Signé par :
-JC Gabillard
-
-or
-
-Date:
-27/1/2017
-For and on behalf of GENERIX:
-Name and forename of authorized person:
-Renaud Vadon
-Title: VP Sales
-For and on behalf of Airbus :
-Name and forename of authorized person:
-<figure>
-Title:
-1
-@ AIRBUS
-Signature:
-</figure>
-
-Digitally signed
-by Jose Villajos
-Serrano - SIG
-Reason: I am
-the approver of
-this document
-Date: 28/11/17
-08:53:24 CET
-
-Signature:
-generix
-group
-Read and Approved
-
-(Signature and stamp preceded by the handwritten entry "Read and Approved")
-2 rue des Peupliers - BP 20158
-59810 LESQUIN
-Tél. : +33 (0)1 77 45 41 80
-Fax : +33 (0)3 20 41 48 07
-Slie : www.generixgroup.com
-SIREN : 3// 619 150 - IVA · IR 88 37/ 619 150
-
-As you can see it tends to have a date and a recall of the signing parties.
-Then the annex starts. Typicaal Appendix or Annex title look like this:
-
-# Appendix 1: Description of the GCI Invoice Manager On Demand service
-# Annexe 1: Description du service GCS On Demand
-<caption>Annexe 1: Niveaux de Services (SLA), pack fonctionnalités et options Les Niveaux de Services (SLA) proposés</caption>
-# ANNEXE 2 : DESCRIPTION DU SERVICE GENERIX COLLABORATIVE REPLENISHMENT (GCR)
-
-So in order to identify the Annex you need to:
-1) Find the signature region, usually after product description and payment details.
-2) After the signature region identify where the Annex start.
-3) Provide in json the line where the annex start, the actual annex line and the context of that lines.
-4) the context of that line is 5 lines upper and lower than the annex line.
-
-If you can identify a single best annex heading, you MUST call tool report_annex_anchor
-with: line_index (0-based), annex_line, and context (≈5 lines around the heading).
-If no safe annex is found, DO NOT call the tool; answer: "no_annex_found".
-"""
-tools_annex = [
-    {
-        "type": "function",
-        "function": {
-            "name": "report_annex_anchor",
-            "description": (
-                "Return where the Annex/Appendix starts. "
-                "Use 0-based line index in the *provided DOCUMENT CONTENT*. "
-                "Context must be ~5 lines before and after the annex line."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "line_index": {
-                        "type": "integer",
-                        "description": "0-based index of the annex heading line in the input text split by \\n."
-                    },
-                    "annex_line": {
-                        "type": "string",
-                        "description": "The exact annex heading line, verbatim from the document."
-                    },
-                    "context": {
-                        "type": "string",
-                        "description": "Concise context: ~5 lines before and after the annex line, joined with \\n."
-                    }
-                },
-                "required": ["line_index", "annex_line", "context"]
-            }
-        }
-    }
-]
-
-def truncate_after_flag(text, annex_flag, signature_flag_list):
-    if len(list(re.finditer(annex_flag, text, flags=re.IGNORECASE)))==1:
-        i = text.find(annex_flag)
-        j = [text.find(signature) for signature in signature_flag_list]
-        print(i, j)
-        j = max(j)
-        if i!= -1 and i>j:
-            print("Safe truncation executed")
-            print("len before truncation =", len(text))
-            text = text[:i]
-            print("len after truncation =", len(text))
-            return text
-        else:
-            print("Annex flag was not found. No truncation took place")
-            return text
-    else:
-        print("Multiple matches for the Annex flag. Truncation considered unsafe")
-        return text
-
-def gpt_truncation(content_sous_str, tools_annex, annex_prompt, do_truncation, client_oai):
-    """
-    this hard trucncation impact culture semester declinantion.
-    TODO: remove some sections only and summerize the rest
-    """
-    if not do_truncation:
-        return content_sous_str
-    content = (content_sous_str.strip())
-    user_question = "Provie the Annex or Appendix using the rules"
-    messages = [
-        {"role": "system", "content": annex_prompt},
-        {"role": "user", "content": f"DOCUMENT CONTENT:\n\n{content}\n\nTASK:\n{user_question}"}
-    ]
-    resp = client_oai.chat.completions.create(
-        model="gpt-4.1",               # your deployment name from the portal
-        messages=messages,
-        tools=tools_annex,
-        tool_choice="auto",
-        temperature=0.05, #0
-        max_tokens=5000,
-    )
-    tc = resp.choices[0].message.tool_calls[0]
-    args = json.loads(tc.function.arguments)
-
-    annex_line_idx = args["line_index"]
-    annex_heading   = args["annex_line"]
-    annex_context   = args["context"]
-    print("Annex truncation found:")
-    print(annex_heading, annex_line_idx)
-
-    # Truncate the CP right before the annex:
-    lines = content.splitlines()
-    truncated = "\n".join(lines[:annex_line_idx])
-    print("before/after truncation", len(content_sous_str), len(truncated))
-    return truncated
-
-def build_response_id(text):
-    stem = Path(text).stem                        # drop extension
-    base = re.split(r'-(?:CG|CP|CONTRAT-CADRE|CONTRAT-SOUSCRIPTION)|_gcr_contrat-de-souscription|__contrat_cadre_saas\b',
-                     stem, 1, flags=re.IGNORECASE)[0]
-    return base 
-
-def print_resp_properties(resp):
-    pt = resp.usage.prompt_tokens
-    ct = resp.usage.completion_tokens
-    tt = resp.usage.total_tokens
-    print(f"prompt: {pt}, completion: {ct}, total: {tt}")
-
-    INPUT_EUR_PER_1M  = 1.73
-    OUTPUT_EUR_PER_1M = 6.91
-
-    cost_eur = (pt/1_000_000)*INPUT_EUR_PER_1M + (ct/1_000_000)*OUTPUT_EUR_PER_1M
-    print(f"Cost per doc: €{cost_eur:.2f}") 
-    print(f"Cost all: €{2000*cost_eur:.2f}")
-
-    tool_call = resp.choices[0].message.tool_calls[0]
-    print("This should be tool_calls (if length then truncated output) =",getattr(resp.choices[0], "finish_reason", None))
-    args_str = tool_call.function.arguments  # from the SDK
-    #print("len:", len(args_str))
-    #print("tail:", args_str[-120:])
-    #print("last char:", args_str[-1])
-
-def validate_columns(df, col_order):
-    missing = [c for c in df.columns if c not in col_order]
-    extra   = [c for c in col_order if c not in df.columns]
-    print("df.cols == col_order: ",len(df.columns) == len(col_order))
-    if missing or extra:
-        print("Missing-from-col_order:", missing)
-        print("Missing-from-df (extra in col_order):", extra)
-        raise ValueError("Column mismatch between df and col_order")
-    
-
-MONTHS_FR = {
-    "janvier":1, "janv":1, "jan":1,
-    "fevrier":2, "février":2, "fevr":2, "fev":2, "févr":2,
-    "mars":3,
-    "avril":4, "avr":4,
-    "mai":5,
-    "juin":6,
-    "juillet":7, "juil":7,
-    "aout":8, "août":8, "aou":8,
-    "septembre":9, "sept":9, "sep":9,
-    "octobre":10, "oct":10,
-    "novembre":11, "nov":11,
-    "decembre":12, "décembre":12, "dec":12, "déc":12,
-}
-
-def parse_date_from_text_fr(text: str):
-    if not text:
-        return None
-
-    # Signatures are near the end; reduce noise & speed up
-    tail = text[-8000:] if len(text) > 8000 else text
-    norm = unidecode(tail.lower())
-    norm = re.sub(r'\s+', ' ', norm)
-
-    candidates = []
-
-    # 1) ISO-like: YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
-    for m in re.finditer(r'\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\b', norm):
-        y, mm, dd = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        candidates.append((m.start(), date(y, mm, dd)))
-
-    # 2) D/M/Y or D-M-Y (assume DMY if day<=31 and month<=12)
-    for m in re.finditer(r'\b(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})\b', norm):
-        dd, mm, yy = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        y = yy + 2000 if yy < 100 else yy
-        if 1 <= dd <= 31 and 1 <= mm <= 12 and 2000 <= y <= 2100:
-            candidates.append((m.start(), date(y, mm, dd)))
-
-    # 3) "le 26 juin 2015" or "26 juin 2015"
-    for m in re.finditer(r'\b(?:le\s+)?(\d{1,2})\s+([a-zéû]+)\s+(20\d{2})\b', norm):
-        dd, month_word, y = int(m.group(1)), m.group(2), int(m.group(3))
-        month_key = month_word  # already unidecoded
-        mm = MONTHS_FR.get(month_key)
-        if mm and 1 <= dd <= 31:
-            candidates.append((m.start(), date(y, mm, dd)))
-
-    if not candidates:
-        return None
-
-    # choose the last occurrence in the tail (closest to signature)
-    candidates.sort(key=lambda x: x[0])
-    return candidates[-1][1]
-
-def parse_date_from_filename(name):
-    # e.g. "...-201709-062279-AVENANT-8-..."
-    m = re.search(r'-(20\d{2})(\d{2})-', name)
-    if m:
-        y, mth = int(m.group(1)), int(m.group(2))
-        return datetime(y, mth, 1).date()
-    return None
-
-def get_response_df(client_oai, message, tools):
-    resp = client_oai.chat.completions.create(
-        model="gpt-4.1",               # your deployment name from the portal
-        messages=message,
-        tools=tools,
-        tool_choice = "auto", #tool_choice={"type":"function","function":{"name":"record_products"}}, #this produced a stop termination instead of toolcals (carter)=> due to some schema mismatch?
-        temperature=0.05, #0
-        max_tokens=32000,
-    )
-    print_resp_properties(resp)
-    tool_call = resp.choices[0].message.tool_calls[0]
-    args_str = tool_call.function.arguments
-    data = json.loads(args_str)
-    df = pd.json_normalize(data["products"])
-    return df
-
-def get_df_cpcgav_all(df_cpcg, df_av_all):
-    df_cpcgav_all = pd.concat([df_cpcg, df_av_all])
-    df_cpcgav_all[["signature_date_cp","signature_date_av"]] = (
-        df_cpcgav_all[["signature_date_cp","signature_date_av"]]
-        .replace("null", pd.NA)
-    )
-    df_cpcgav_all["signature_date_any"] = (
-        df_cpcgav_all["signature_date_av"].combine_first(df_cpcgav_all["signature_date_cp"])
-    )
-    df_cpcgav_all["signature_date_any"] = pd.to_datetime(df_cpcgav_all["signature_date_any"], errors="coerce")
-    df_cpcgav_all = df_cpcgav_all.sort_values("signature_date_any")
-    df_cpcgav_all = df_cpcgav_all.drop(columns=["signature_date_any"])
-    df_cpcgav_all = df_cpcgav_all.reset_index(drop=True)
-    return df_cpcgav_all
-
-def calculate_total_abb(df):
-    """
-    Re-do loyer mensuel.
-    Get the total_abb for fixed products which are not volumne, one shot or included
-    Use it to add to the volume calculation.
-
-    Obs: needs to take a CP/CG OR avenant df at the time.
-
-    TODO: the warning is onlt valid for products which are not one shot or included. you should
-    trigger it only in those cases, actually doing the enitre calculation in those cases.
-    """
-    df = df.copy()
-    one_shot_list = (df["one_shot_service"]==True).unique()
-    if len(one_shot_list)==1 and one_shot_list[0]==True: #all rows is one shot, no calculation to do
-        df["total_abbonement_mensuel_calc"]=np.nan
-        return df
-    div = {"mensuelle": 1, "trimestrielle": 3, "annuelle": 12, "semestrielle":6}
-    one_shot_mask = df['one_shot_service'].astype(bool)==True
-    is_included__mask = df['is_included'].astype(bool)==True    
-    not_applicable = ~(one_shot_mask | is_included__mask)
-    df["loyer_periodicity"] = df["loyer_periodicity"].str.lower()
-    if any([per not in div.keys() for per in df[not_applicable]["loyer_periodicity"].unique()]):
-        print("WARNING: unknonw loyer_periodicity for total abonnemet calculation")
-    #print(check)
-    df["loyer_f"] = (
-    pd.to_numeric(df["loyer"].replace({"null": 0, None: 0}), errors="coerce")
-      .fillna(0.0)
-      .astype(float)
-    )
-    df["loyer_m"] = df["loyer_f"] / df["loyer_periodicity"].map(div).fillna(1)
-    if any(df["loyer_m"].astype(int) != df["loyer_f"].astype(int)):
-        print("loyer_m calculation differs from llm's")
-
-    mask_fixed = (~df["is_volume_product"]) & (~df["one_shot_service"]) & (~df["is_included"])
-    total_abb_fixed = sum(np.where(mask_fixed, df["loyer_m"], 0)) #total abb for fixed products
-    #print("total_abb_fixed = ", total_abb_fixed)
-    #print("why abb fix zero all the time?", np.where(mask_fixed, df["loyer_m"], 0))
-
-    df["total_abbonement_mensuel_calc"] = np.where(
-        df["is_volume_product"],
-        total_abb_fixed + df["loyer_m"],
-        total_abb_fixed
-    )
-    null_mask = df["one_shot_service"] | df["is_included"]
-    df.loc[null_mask, "total_abbonement_mensuel_calc"] = np.nan
-    s = df.pop("total_abbonement_mensuel_calc")  # removes & returns the column
-    i = df.columns.get_loc("total_abbonement_mensuel") + 1
-    df.insert(i, "total_abbonement_mensuel_calc", s)
-    df = df.drop(columns=["loyer_m", "loyer_f"])
-    return df
-
-def loyer2null(df, safe_flag=True):
-    df =df.copy()
-    if safe_flag==True:
-        if sorted(df["one_shot_service"].unique())!=sorted([False,  True]) or sorted(df["is_volume_product"].unique())!=sorted([False,  True]):
-            print("WARNING unsafe loyer2null call. returning original df")
-            return df
-    one_shot_mask = df['one_shot_service'].astype(bool)==True
-    not_volume_mask = df['is_volume_product'].astype(bool)==False
-    no_loyer_mask = one_shot_mask & not_volume_mask
-    # (a) If price_unitaire is NaN and loyer has a value, move loyer into price_unitaire
-
-    df["price_unitaire_f"] = pd.to_numeric(df["price_unitaire"].replace({"null": np.nan}), errors="coerce")
-    df["price_unitaire_f"].values
-
-    move_mask = one_shot_mask & df['price_unitaire_f'].isna() & df['loyer'].notna()
-    print("moving badly classified loyer to price... number of affected rows = ", sum(move_mask))
-    df.loc[move_mask, 'price_unitaire'] = df.loc[move_mask, 'loyer']
-
-    # (b) For ALL one-shot rows, null out recurring/cadence fields
-    cols_to_null = [
-        'loyer', 'loyer_facturation', 'loyer_annuele',
-        'billing_frequency', 'loyer_periodicity'
-    ]
-    for c in cols_to_null:
-        if c in df.columns:
-            df.loc[no_loyer_mask, c] = np.nan
-    df =df.drop(columns=["price_unitaire_f"])
-    return df
-
-def get_cpcgav(docs, verbose=True, safe=True, avenant_ordering=True):
-    # TODO: This is getting very fragile...
-    # TODO: this ordering options, without llms seems fine actually.
-    cp_identifiers = ["SOUSCRIPTION", "CP",  "LICENCE", "CONTRAT-SAAS", "CONTRAT-PRESTATIONS"] #suez is a special case due to bad id
-    cg_identifiers = ["CADRE", "CG"]
-    content_cadre = [
-        doc.get("content", "")
-        for doc in docs
-        if  any([c_flag.lower() in doc["id"].lower() for c_flag in cg_identifiers])
-                and "avenant" not in doc["id"].lower()
-    ]
-    content_sous = [
-        doc.get("content", "")
-        for doc in docs
-        if any([c_flag.lower() in doc["id"].lower() for c_flag in cp_identifiers])
-               #and "avenant" not in doc["id"].lower()
-    ]
-    if safe:
-        assert len(content_cadre) >= 1 and len(content_sous) >= 1
-    if avenant_ordering:
-        avenant_id_content_list = [
-            (doc.get("id", ""), doc.get("content", ""))
-            for doc in docs
-            if "AVENANT-".lower() in doc["id"].lower()
-        ]
-        # OBS: tuple structre (id, content, on=irdering on file name, oc=ordering of file content)
-        avenant_id_content_index_list = [
-            (
-                id,
-                content,
-                parse_date_from_filename(id),
-                parse_date_from_text_fr(content),
-            )
-            for id, content in avenant_id_content_list
-        ]
-        sorting_key = 2  # parse_date_from_filename(id) -> from filname
-        sorting_key = 3  # parse_date_from_text_fr(content) -> from content
-        avenant_id_content_index_list = sorted(
-            avenant_id_content_index_list, key=lambda x: x[sorting_key]
-        )
-        if verbose:
-            print("Avenant ordering:")
-            for id, _, on, oc in avenant_id_content_index_list:
-                print(on, oc)
-        content_avenant = [
-            content for _, content, _, _ in avenant_id_content_index_list
-        ]
-    else:
-        content_avenant = [
-            doc.get("content", "")
-            for doc in docs
-            if "AVENANT-".lower() in doc["id"].lower()
-        ]
-    if verbose:
-        print(
-            "Amount documents [CG,CP,AV]=",
-            len(content_cadre),
-            len(content_sous),
-            len(content_avenant),
-        )
-    return content_cadre, content_sous, content_avenant
-
-
-def process_cgcp(client_oai, content_cadre, content_sous, tools_annex, annex_prompt, do_truncation, safe_flag=False, verbose=True):
-    if len(content_cadre) == 1 and len(content_sous) == 1:
-        content_cadre_str = content_cadre[0]
-        content_sous_str = gpt_truncation(
-            content_sous[0], tools_annex, annex_prompt, do_truncation, client_oai
-        )
-    elif len(content_cadre) == 1 and len(content_sous) >= 1:
-        content_cadre_str = content_cadre[0]
-        content_sous_str = "\n".join(
-            gpt_truncation(t, tools_annex, annex_prompt, do_truncation, client_oai)
-            for t in content_sous
-        )
-    elif safe_flag==False: #no expectation of amount of docs in cp or cg
-        content_cadre_str = "\n".join(content_cadre)
-        content_sous_str = "\n".join(content_sous)
-    else:
-        raise ValueError("Unexpected lengths.")
-    if verbose:
-        print("len [str] content [cg,cp]=", len(content_cadre_str), len(content_sous_str))
-    return content_cadre_str, content_sous_str
 
 
 def get_docs(company_name, cosmos_digitaliezd, exclude_flag=True, verbose=True):
@@ -484,12 +21,62 @@ def get_docs(company_name, cosmos_digitaliezd, exclude_flag=True, verbose=True):
     if verbose:
         print("All recuperated docs from company name:")
         for doc in docs:
-            print(
-                doc["id"], doc.get("blob_path"), doc.get("page_count")
-            )
+            print(doc["id"], doc.get("blob_path"), doc.get("page_count"))
     return docs
 
-def build_message_cgcp(content_cadre_str, content_sous_str, user_question, financial_prompt):
+
+def get_cpcgav(
+    docs, cp_identifiers, cg_identifiers, av_identifiers, verbose=True, safe_flag=True
+):
+    content_cadre = [
+        doc.get("content", "")
+        for doc in docs
+        if any([c_flag.lower() in doc["id"].lower() for c_flag in cg_identifiers])
+        and "avenant" not in doc["id"].lower()
+    ]
+    content_sous = [
+        doc.get("content", "")
+        for doc in docs
+        if any([c_flag.lower() in doc["id"].lower() for c_flag in cp_identifiers])
+        # and "avenant" not in doc["id"].lower()
+    ]
+    content_avenant = [
+        doc.get("content", "")
+        for doc in docs
+        if "AVENANT-".lower() in doc["id"].lower()
+    ]
+    content_avenant = [
+        doc.get("content", "")
+        for doc in docs
+        if any([c_flag.lower() in doc["id"].lower() for c_flag in av_identifiers])
+    ]
+    if safe_flag:
+        if len(content_cadre) == 0 and len(content_sous) == 0:
+            raise ValueError("no CP or CG content")
+    if verbose:
+        print(
+            "Amount documents [CG,CP,AV]=",
+            len(content_cadre),
+            len(content_sous),
+            len(content_avenant),
+        )
+    return content_cadre, content_sous, content_avenant
+
+
+def process_cgcp(content_cadre, content_sous, verbose=True):
+    """ """
+    content_cadre_str = "\n".join(content_cadre)
+    content_sous_str = "\n".join(content_sous)
+    if verbose:
+        print(
+            "len [str] content [cg,cp]=", len(content_cadre_str), len(content_sous_str)
+        )
+    return content_cadre_str, content_sous_str
+
+
+def build_message_cgcp(
+    content_cadre_str, content_sous_str, user_question, financial_prompt
+):
     content_cpcg = (
         "=== DOC: CADRE — type=cadre ===\n"
         + content_cadre_str.strip()
@@ -506,6 +93,127 @@ def build_message_cgcp(content_cadre_str, content_sous_str, user_question, finan
     ]
     return messages_cpcg
 
+
+def get_response_df(client_oai, message, tools):
+    resp = client_oai.chat.completions.create(
+        model="gpt-4.1",  # your deployment name from the portal
+        messages=message,
+        tools=tools,
+        tool_choice="auto",  # tool_choice={"type":"function","function":{"name":"record_products"}}, #this produced a stop termination instead of toolcals (carter)=> due to some schema mismatch?
+        temperature=0.05,  # 0
+        max_tokens=32000,
+    )
+    print_resp_properties(resp)
+    tool_call = resp.choices[0].message.tool_calls[0]
+    args_str = tool_call.function.arguments
+    data = json.loads(args_str)
+    df = pd.json_normalize(data["products"])
+    return df
+
+
+def print_resp_properties(resp):
+    pt = resp.usage.prompt_tokens
+    ct = resp.usage.completion_tokens
+    tt = resp.usage.total_tokens
+    print(f"prompt: {pt}, completion: {ct}, total: {tt}")
+
+    INPUT_EUR_PER_1M = 1.73
+    OUTPUT_EUR_PER_1M = 6.91
+
+    cost_eur = (pt / 1_000_000) * INPUT_EUR_PER_1M + (
+        ct / 1_000_000
+    ) * OUTPUT_EUR_PER_1M
+    print(f"Cost per doc: €{cost_eur:.2f}")
+    print(f"Cost all: €{2000*cost_eur:.2f}")
+
+    print(
+        "This should be tool_calls (if length then truncated output) =",
+        getattr(resp.choices[0], "finish_reason", None),
+    )
+
+
+def get_df_cpcgav_all(df_cpcg, df_av_all):
+    df_cpcgav_all = pd.concat([df_cpcg, df_av_all])
+    df_cpcgav_all[["signature_date_cp", "signature_date_av"]] = df_cpcgav_all[
+        ["signature_date_cp", "signature_date_av"]
+    ].replace("null", pd.NA)
+    df_cpcgav_all["signature_date_any"] = df_cpcgav_all[
+        "signature_date_av"
+    ].combine_first(df_cpcgav_all["signature_date_cp"])
+    df_cpcgav_all["signature_date_any"] = pd.to_datetime(
+        df_cpcgav_all["signature_date_any"], errors="coerce"
+    )
+    df_cpcgav_all = df_cpcgav_all.sort_values("signature_date_any")
+    df_cpcgav_all = df_cpcgav_all.drop(columns=["signature_date_any"])
+    df_cpcgav_all = df_cpcgav_all.reset_index(drop=True)
+    return df_cpcgav_all
+
+
+def loyer2null(df, safe_flag=True):
+    df = df.copy()
+    if safe_flag == True:
+        if sorted(df["one_shot_service"].unique()) != sorted([False, True]) or sorted(
+            df["is_volume_product"].unique()
+        ) != sorted([False, True]):
+            print("WARNING unsafe loyer2null call. returning original df")
+            return df
+    one_shot_mask = df["one_shot_service"].astype(bool) == True
+    not_volume_mask = df["is_volume_product"].astype(bool) == False
+    no_loyer_mask = one_shot_mask & not_volume_mask
+    # (a) If price_unitaire is NaN and loyer has a value, move loyer into price_unitaire
+
+    df["price_unitaire_f"] = pd.to_numeric(
+        df["price_unitaire"].replace({"null": np.nan}), errors="coerce"
+    )
+    df["price_unitaire_f"].values
+
+    move_mask = one_shot_mask & df["price_unitaire_f"].isna() & df["loyer"].notna()
+    print(
+        "moving badly classified loyer to price... number of affected rows = ",
+        sum(move_mask),
+    )
+    df.loc[move_mask, "price_unitaire"] = df.loc[move_mask, "loyer"]
+
+    # (b) For ALL one-shot rows, null out recurring/cadence fields
+    cols_to_null = [
+        "loyer",
+        "loyer_facturation",
+        "loyer_annuele",
+        "billing_frequency",
+        "loyer_periodicity",
+    ]
+    for c in cols_to_null:
+        if c in df.columns:
+            df.loc[no_loyer_mask, c] = np.nan
+    df = df.drop(columns=["price_unitaire_f"])
+    return df
+
+
+def upsert_to_cosmos(affair_df, affair, cosmos_table):
+    rows = json.loads(affair_df.to_json(orient="records"))
+    batch = {"id": affair, "rows": rows}
+    cosmos_table.upsert_item(batch)
+
+
+def validate_columns(df, col_order):
+    missing = [c for c in df.columns if c not in col_order]
+    extra = [c for c in col_order if c not in df.columns]
+    print("df.cols == col_order: ", len(df.columns) == len(col_order))
+    if missing or extra:
+        print("Missing-from-col_order:", missing)
+        print("Missing-from-df (extra in col_order):", extra)
+        raise ValueError("Column mismatch between df and col_order")
+
+
+def rectify_df(df_cpcg, col_order):
+    df_cpcg = df_cpcg.copy()
+    validate_columns(df_cpcg, col_order)
+    df_cpcg = df_cpcg.fillna("null")
+    df_cpcg = df_cpcg[col_order]
+    print("df_cpcg shape = ", df_cpcg.shape)
+    return df_cpcg
+
+
 def build_message_avenant(avenant_str, avenant_question, financial_prompt):
     content_av = "=== DOC: AVENANT — type=avenant ===\n" + avenant_str
     messages_av = [
@@ -517,13 +225,6 @@ def build_message_avenant(avenant_str, avenant_question, financial_prompt):
     ]
     return messages_av
 
-def rectify_df(df_cpcg, col_order):
-    df_cpcg=df_cpcg.copy()
-    validate_columns(df_cpcg, col_order)
-    df_cpcg = df_cpcg.fillna("null")
-    df_cpcg = df_cpcg[col_order]
-    print("df_cpcg shape = ", df_cpcg.shape)
-    return df_cpcg
 
 def concat_avenant_df(df_av_list):
     df_av_all = pd.concat(df_av_list)
