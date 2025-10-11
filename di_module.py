@@ -56,6 +56,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 from azure.core.exceptions import HttpResponseError
 
+def print_db_content(cosmos_digitaliezd: Any, max_item_count: int = 100) -> None:
+    """Print a short overview of items currently in the DB."""
+    items = list(cosmos_digitaliezd.read_all_items(max_item_count=max_item_count))
+    print("total amount of items in DB =", len(items))
+    #for i, doc in enumerate(items, start=1):
+    #    print(i, doc["id"])
+
 def process_affair_document_intelligence(
     cosmos_digitaliezd: Any,
     container: Any,

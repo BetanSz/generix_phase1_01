@@ -1,3 +1,6 @@
+cgcp_question = "Extract the products found in the contract with their financial conditions using the rules and return products via the tool."
+avenant_question = "Extract all the products found in each avenant sections with their financial conditions using the rules and return products via the tool."
+
 financial_prompt = """
 # Main Objectives:
 - Your main objective is to identify the products present in the contract and retrieve the items defined in the Scope to extract. This is mainly financial

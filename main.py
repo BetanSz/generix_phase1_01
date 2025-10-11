@@ -90,21 +90,102 @@ Notes
 """
 
 from pathlib import Path
-from di_module import *
+from di_module import process_affair_document_intelligence, print_db_content
 from IPython import embed
 from pathlib import Path
 from clients import client_di, cosmos_digitaliezd, client_oai, cosmos_table, container
-from gpt_module_financial_agent import *
-from gpt_module import *
+import argparse
+
+from gpt_module import (
+    get_docs,
+    get_cpcgav,
+    verify_cpcgav_separation,
+    run_avenants_pipeline,
+    run_cgcp_pipeline,
+    get_df_cpcgav_all,
+    loyer2null,
+    upsert_to_cosmos,
+    save_df_local,
+    cp_identifiers,
+    cg_identifiers,
+    av_identifiers
+)
+from gpt_module_financial_agent import financial_prompt, financial_tools, col_order, cgcp_question, avenant_question
+
+DEFAULT_AFFAIRS = ["mason", "anagra"]
+DEFAULT_DI = False
+DEFAULT_TAG = "main"
+DEFAULT_OUTDIR = Path(
+    r"C:\Users\EstebanSzames\OneDrive - CELLENZA\Bureau\Generix\generix_phase1_01\doc_digitalized_sample"
+)
+
+def parse_cli_args() -> argparse.Namespace:
+    """
+    Parse CLI arguments for the pipeline.
+
+    --affairs can be repeated or comma-separated, e.g.:
+      --affairs mason anagra
+      --affairs mason,anagra
+
+    --di enables the Document Intelligence phase (default off).
+    """
+    def comma_or_list(arg: str) -> list[str]:
+        # allow "a,b,c" or "a" (single item)
+        return [x for x in (s.strip() for s in arg.split(",")) if x]
+
+    parser = argparse.ArgumentParser(description="Contract processing pipeline")
+    parser.add_argument(
+        "--affairs",
+        "-a",
+        nargs="+",
+        type=str,
+        help="Affairs to process (list or comma-separated). Default: %(default)s",
+        default=DEFAULT_AFFAIRS,
+    )
+    parser.add_argument(
+        "--di",
+        action="store_true",
+        help="Enable Document Intelligence ingestion (default: off).",
+        default=DEFAULT_DI,
+    )
+    parser.add_argument(
+        "--tag",
+        "-t",
+        type=str,
+        help="Local save tag used in output filenames.",
+        default=DEFAULT_TAG,
+    )
+    parser.add_argument(
+        "--out-dir",
+        "-o",
+        type=Path,
+        help="Directory for local Markdown/Excel outputs.",
+        default=DEFAULT_OUTDIR,
+    )
+
+    args = parser.parse_args()
+
+    # Normalize affairs: expand any comma-separated tokens inside nargs list
+    normalized: list[str] = []
+    for token in args.affairs:
+        normalized.extend(comma_or_list(token))
+    args.affairs = normalized
+    return args
 
 if __name__ == "__main__":
     # User input
-    affair_to_treat = ["mason"]
-    performe_document_intelligence_read = False
-    performe_document_intelligence_read = True
-    local_path = Path(
-        r"C:\Users\EstebanSzames\OneDrive - CELLENZA\Bureau\Generix\generix_phase1_01\doc_digitalized_sample"
-    )
+    args = parse_cli_args()
+    # User input (with defaults if not passed)
+    # use python main.py -a "mason,anagra"
+    affair_to_treat = args.affairs                      # e.g. ["mason","anagra"]
+    performe_document_intelligence_read = args.di       # True if --di, else False
+    local_save_tag = args.tag                           # e.g. "main"
+    local_path = args.out_dir                           # Path(...)
+
+    #affair_to_treat = ["S.N.F", "NORAUTO" , "SAVENCIA", "BOIRON", "AIRBUS-HELICOPTERS", "CULTURA", "suez", "carter",
+    #                    "edenred", "renault", "mason" , "fr_mes", "id_log" , "invicta", "coca", "maha",
+    #                    "kueh", "naviland", "psa", "ricard", "robot", "serhr", "shenker", "sicame", "watch",
+    #                    "combrone", "anagra"]
 
     # Document intelligence
     for affair in affair_to_treat:
@@ -112,61 +193,40 @@ if __name__ == "__main__":
             process_affair_document_intelligence(
                 cosmos_digitaliezd, container, client_di, affair, local_path
             )
-
     # GPT agent
-    local_save_tag = "main"
-    cgcp_question = "Extract the products found in the contract with their financial conditions using the rules and return products via the tool."
-    avenant_question = "Extract all the products found in each avenant sections with their financial conditions using the rules and return products via the tool."
-    cp_identifiers = [
-        "SOUSCRIPTION",
-        "CP",
-        "LICENCE",
-        "CONTRAT-SAAS",
-        "CONTRAT-PRESTATIONS",
-    ]  # suez is a special case due to bad id
-    cg_identifiers = ["CADRE", "CG"]
-    av_identifiers = ["AVENANT-"]
-    items = list(cosmos_digitaliezd.read_all_items(max_item_count=100))
-    print("total amount of items in DB =", len([item for item in items]))
-    for i, doc in enumerate(items, start=1):
-        print(i, doc["id"])
-    for affair in affair_to_treat:
+    print_db_content(cosmos_digitaliezd)
+    for i, affair in enumerate(affair_to_treat, start=1):
+        print(f"\nTreating affair {i}/{len(affair_to_treat)} = ", affair)
         docs = get_docs(affair, cosmos_digitaliezd)
         content_cadre, content_sous, content_avenant = get_cpcgav(
             docs, cp_identifiers, cg_identifiers, av_identifiers
         )
-        content_cadre_str, content_sous_str = process_cgcp(
-            content_cadre,
-            content_sous,
+        verify_cpcgav_separation(docs, content_cadre, content_sous, content_avenant)
+        #continue
+        cpcg_df = run_cgcp_pipeline(
+            content_cadre=content_cadre,
+            content_sous=content_sous,
+            client_oai=client_oai,
+            cgcp_question=cgcp_question,
+            financial_prompt=financial_prompt,
+            financial_tools=financial_tools,
+            col_order=col_order,
         )
-        messages_cpcg = build_message_cgcp(
-            content_cadre_str, content_sous_str, cgcp_question, financial_prompt
+        df_av_all = run_avenants_pipeline(
+            content_avenant=content_avenant,
+            client_oai=client_oai,
+            avenant_question=avenant_question,
+            financial_prompt=financial_prompt,
+            financial_tools=financial_tools,
+            col_order=col_order
         )
-        affair_df = get_response_df(client_oai, messages_cpcg, financial_tools)
-        affair_df = rectify_df(affair_df, col_order)
-        tag = affair + local_save_tag
-        affair_df.to_markdown(f"product_cpcg_{tag}.md", index=False)
-        affair_df.to_excel(f"product_cpcg_{tag}.xlsx")
-        df_av_list = []
-        for i, avenant_str in enumerate(content_avenant, start=1):
-            print(
-                f"*****************  processing {i}/{len(content_avenant)} *****************"
-            )
-            messages_av = build_message_avenant(
-                avenant_str, avenant_question, financial_prompt
-            )
-            print("content [AV]=", len(avenant_str))
-            df_av = get_response_df(client_oai, messages_av, financial_tools)
-            rectify_df(df_av)
-            df_av_list.append(df_av)
-        if df_av_list:
-            df_av_all = concat_avenant_df(df_av_list)
-            df_av_all.to_markdown(f"product_av_{tag}.md", index=False)
-            affair_df = get_df_cpcgav_all(affair_df, df_av_all)
-            affair_df = loyer2null(affair_df, safe_flag=True)
-            affair_df = affair_df.fillna("null")
-            affair_df.to_markdown(f"product_cpcgav_{tag}.md", index=False)
-            print(f"product_cpcgav_{tag}.xlsx")
-            affair_df.to_excel(f"product_cpcgav_{tag}.xlsx")
+        if df_av_all is not None:
+            affair_df = get_df_cpcgav_all(cpcg_df, df_av_all)
+        else:
+            affair_df = cpcg_df.copy()
+        affair_df = loyer2null(cpcg_df)
+        affair_df = affair_df.fillna("null")
+        save_df_local(affair, local_save_tag, cpcg_df, df_av_all, affair_df)
         upsert_to_cosmos(affair_df, affair, cosmos_table)
         print("END")
+
